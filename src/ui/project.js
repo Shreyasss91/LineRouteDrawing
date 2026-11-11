@@ -163,8 +163,13 @@ export function toProjectPayload(project) {
  * dropped rather than written as `null`, which would make the file say a callout
  * had been moved when it had not.
  *
- * @param {object|Map<string, {dx: number, dy: number}>} placements Placements.
- * @returns {object} Plain object of `{id: {dx, dy}}`.
+ * The candidate index travels with the offset. It records which of the layout's
+ * candidate positions the label was on when the user grabbed it, so reopening the
+ * project puts the nudge back on the same anchor rather than on the first one.
+ *
+ * @param {object|Map<string, {dx: number, dy: number, candidateIndex?: number}>} placements
+ *   Placements.
+ * @returns {object} Plain object of `{id: {dx, dy, candidateIndex}}`.
  */
 function normalizePlacements(placements) {
   const out = {};
@@ -175,7 +180,10 @@ function normalizePlacements(placements) {
     const dx = Number(offset.dx);
     const dy = Number(offset.dy);
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
-    out[String(id)] = { dx: roundTo(dx, 2), dy: roundTo(dy, 2) };
+    const record = { dx: roundTo(dx, 2), dy: roundTo(dy, 2) };
+    const ci = Number(offset.candidateIndex);
+    if (Number.isInteger(ci) && ci >= 0) record.candidateIndex = ci;
+    out[String(id)] = record;
   }
   return out;
 }
@@ -586,7 +594,13 @@ function validatePlacements(raw, kind) {
     const dx = Number(offset.dx);
     const dy = Number(offset.dy);
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
-    placements[String(id)] = { dx, dy };
+    const record = { dx, dy };
+    // A stored candidate index is optional and, when present, keeps the nudge on
+    // the anchor the user grabbed. An old file has none, which is fine: the first
+    // candidate is the historical default and the offset is applied from there.
+    const ci = Number(offset.candidateIndex);
+    if (Number.isInteger(ci) && ci >= 0) record.candidateIndex = ci;
+    placements[String(id)] = record;
   }
   return { ok: true, placements };
 }

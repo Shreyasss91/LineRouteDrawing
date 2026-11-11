@@ -144,7 +144,12 @@ test('the example SVG and PDF are produced from identical geometry', () => {
   assert.equal(primitives.poles, svgScene.poles.length);
   assert.equal(primitives.tc, svgScene.tc.length);
   assert.equal(svgScene.tc.length, 1);
-  assert.doesNotMatch(svg, /<text/);
+  // The drawing's own labels - Origin and the alphabetical endpoints - are hidden
+  // in exports. Annotation text is content, not a label, so it is allowed and in
+  // fact required: a span length that vanished in the PDF would be a fact lost at
+  // the moment it was printed.
+  assert.doesNotMatch(svg, />Origin</);
+  assert.doesNotMatch(svg, /<g id="labels"/);
 
   const text = new TextDecoder('latin1').decode(new Uint8Array(doc.output('arraybuffer')));
   assert.doesNotMatch(text, /Origin/);

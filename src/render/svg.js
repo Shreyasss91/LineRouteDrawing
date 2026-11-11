@@ -240,6 +240,26 @@ export function renderSceneToSvg(scene, options = {}) {
       }
       parts.push('</g>');
     }
+
+    // The incomplete-data notice. It is part of the scene, so it is drawn here and
+    // by every other renderer from the same record; a sheet that hides it would be
+    // presenting a partial survey as a finished one.
+    if (annots.notice) {
+      const n = annots.notice;
+      parts.push(
+        `<g id="notice" font-family="${escapeXml(scene.fontFamily)}" font-size="${num(n.fontSize)}">`,
+      );
+      parts.push(
+        `<rect x="${num(n.boxes.x1)}" y="${num(n.boxes.y1)}" ` +
+          `width="${num(n.boxes.x2 - n.boxes.x1)}" height="${num(n.boxes.y2 - n.boxes.y1)}" ` +
+          `fill="#ffffff" fill-opacity="0.92" stroke="#b23b3b" stroke-width="0.8"/>`,
+      );
+      parts.push(
+        `<text x="${num(n.center.x)}" y="${num(n.center.y)}" text-anchor="middle" ` +
+          `dominant-baseline="central" fill="#a12c2c">${escapeXml(n.text)}</text>`,
+      );
+      parts.push('</g>');
+    }
   }
 
   parts.push('</svg>');

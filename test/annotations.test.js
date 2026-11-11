@@ -339,14 +339,50 @@ test('20. a span with a measured length gets a label', () => {
   lengths = setSpanLength(lengths, span.id, 32.5).spanLengths;
 
   const s = scene({ spanLengths: lengths });
-  assert.equal(s.annotations.spans.length, 1);
-  assert.deepEqual(s.annotations.spans[0].lines, ['32.5 m']);
-  assert.equal(s.annotations.spans[0].assetId, span.id);
+  // Every span is labelled, so the measured one is one of them rather than the only
+  // one. Finding it by asset id keeps this a test of the label, not of the count.
+  const labelled = s.annotations.spans.find((a) => a.assetId === span.id);
+  assert.ok(labelled, 'the measured span is labelled');
+  assert.deepEqual(labelled.lines, ['32.5 m']);
+  assert.equal(labelled.measured, true);
 });
 
-test('21. an unmeasured span gets no label at all', () => {
+test('21. an unmeasured span is labelled with a dash, never with nothing', () => {
+  // A span with no label at all makes a half-surveyed drawing look finished, so the
+  // placeholder is the defect fix rather than a cosmetic choice.
   const s = scene({ spanLengths: createSpanLengths() });
-  assert.equal(s.annotations.spans.length, 0);
+  assert.equal(s.annotations.spans.length > 0, true, 'spans are labelled');
+  for (const span of s.annotations.spans) {
+    assert.deepEqual(span.lines, ['— m'], 'an unmeasured span reads as a dash');
+    assert.equal(span.measured, false);
+  }
+});
+
+test('21b. the unmeasured placeholder is not read as zero', () => {
+  const s = scene({ spanLengths: createSpanLengths() });
+  const text = s.annotations.spans[0].lines[0];
+  assert.notEqual(text, '0 m');
+  assert.match(text, /—/);
+});
+
+test('21c. the incomplete notice counts unmeasured spans and disappears when complete', () => {
+  const registry = buildAssetRegistry(buildNetwork(EXAMPLE, {}));
+  const spans = registry.allSpanAssets();
+
+  const empty = scene({ spanLengths: createSpanLengths() });
+  assert.ok(empty.annotations.notice, 'a notice is present while spans are unmeasured');
+  assert.equal(empty.annotations.completeness.total, spans.length);
+  assert.equal(empty.annotations.completeness.unmeasured, spans.length);
+  assert.match(
+    empty.annotations.notice.text,
+    new RegExp(`${spans.length} of ${spans.length} spans unmeasured`),
+  );
+
+  let all = createSpanLengths();
+  for (const span of spans) all = setSpanLength(all, span.id, 30).spanLengths;
+  const complete = scene({ spanLengths: all });
+  assert.equal(complete.annotations.notice, null, 'the notice is gone once every span is measured');
+  assert.equal(complete.annotations.completeness.unmeasured, 0);
 });
 
 test('22. an integer length has no trailing decimal', () => {
@@ -483,4 +519,69 @@ test('30. the example drawing with a full survey produces one annotation per ite
   const s = scene({ loads, spanLengths: lengths });
   assert.equal(s.annotations.callouts.length, 3, 'one per loaded node');
   assert.equal(s.annotations.spans.length, spans.length, 'one per measured span');
+});
+
+// ---- manual placement (Part I2) ----
+
+/** A drawing with one load, giving a callout to drag. */
+function loadScene(offset, extra = {}) {
+  return scene({
+    loads: [{ id: 'load-1', nodeId: 'dst:route-2', value: 25, unit: 'kVA' }],
+    loadPlacements: offset ? { 'dst:route-2': offset } : {},
+    ...extra,
+  });
+}
+
+test('31. a drag starts from the automatic position, not from candidate zero', () => {
+  // The defect: a callout the layout had put on the pole's left jumped across the
+  // pole the moment it was touched, because the offset was applied to the first
+  // candidate instead of to the one on screen.
+  const auto = loadScene(null).annotations.callouts[0];
+  const moved = loadScene({ dx: 4, dy: 0, candidateIndex: auto.candidateIndex }).annotations
+    .callouts[0];
+  assert.equal(auto.candidateIndex, moved.candidateIndex, 'the anchor is the one that was drawn');
+  assert.equal(Math.round(moved.center.x - auto.center.x), 4, 'the nudge is the nudge');
+  assert.equal(Math.round(moved.center.y - auto.center.y), 0);
+});
+
+test('32. an offset with no stored index falls back to the first candidate', () => {
+  // An older project has no candidate index. It must still open and still show the
+  // annotation where its offset says, rather than drawing at NaN.
+  const auto = loadScene(null).annotations.callouts[0];
+  const old = loadScene({ dx: 10, dy: 10 }).annotations.callouts[0];
+  assert.ok(Number.isFinite(old.center.x) && Number.isFinite(old.center.y));
+  assert.ok(old.center.x > auto.center.x, 'a positive nudge moves it right');
+});
+
+test('33. a manual placement is stable across two builds of the same scene', () => {
+  const offset = { dx: 8, dy: -6, candidateIndex: 2 };
+  const a = loadScene(offset).annotations.callouts[0];
+  const b = loadScene(offset).annotations.callouts[0];
+  assert.deepEqual(a.center, b.center, 'the same input gives the same position');
+});
+
+test('34. a span label drag starts from its automatic position', () => {
+  const registry = buildAssetRegistry(buildNetwork(EXAMPLE, {}));
+  const span = registry.allSpanAssets()[0];
+  let lengths = createSpanLengths();
+  lengths = setSpanLength(lengths, span.id, 32).spanLengths;
+
+  const auto = scene({ spanLengths: lengths }).annotations.spans.find((s) => s.assetId === span.id);
+  const moved = scene({
+    spanLengths: lengths,
+    spanPlacements: { [span.id]: { dx: 3, dy: 0, candidateIndex: auto.candidateIndex } },
+  }).annotations.spans.find((s) => s.assetId === span.id);
+
+  assert.equal(auto.candidateIndex, moved.candidateIndex);
+  assert.equal(Math.round(moved.center.x - auto.center.x), 3);
+});
+
+test('35. the candidate index a drag records is the one the layout chose', () => {
+  // Contract between the layout and the drag handler: whatever the automatic pass
+  // settled on is what an annotation reports, so the handler has something real to
+  // store.
+  const s = loadScene(null);
+  const callout = s.annotations.callouts[0];
+  assert.equal(Number.isInteger(callout.candidateIndex), true);
+  assert.ok(callout.candidateIndex >= 0);
 });

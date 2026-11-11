@@ -250,6 +250,26 @@ export function renderSceneToPdf(scene, options) {
         });
       }
     }
+
+    // The incomplete-data notice, drawn from the scene so it cannot be present in
+    // one output and missing from another.
+    if (annots.notice) {
+      const n = annots.notice;
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(178, 59, 59);
+      doc.setLineWidth(Math.max(0.2, 0.8 * fit.scale));
+      doc.rect(
+        tx(n.boxes.x1),
+        ty(n.boxes.y2),
+        (n.boxes.x2 - n.boxes.x1) * fit.scale,
+        (n.boxes.y2 - n.boxes.y1) * fit.scale,
+        'FD',
+      );
+      doc.setFont(scene.fontFamily.split(',')[0].trim(), 'normal');
+      doc.setFontSize(Math.max(3, n.fontSize * fit.scale));
+      doc.setTextColor(161, 44, 44);
+      doc.text(n.text, tx(n.center.x), ty(n.center.y), { align: 'center', baseline: 'middle' });
+    }
   }
 
   // Labels only exist for the preview profile; exports carry none.

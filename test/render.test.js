@@ -39,14 +39,18 @@ test('SVG output is editable vector primitives, not an image', () => {
   assert.match(svg, /<polygon /);
   assert.doesNotMatch(svg, /<image/);
   assert.doesNotMatch(svg, /data:image/);
-  assert.doesNotMatch(svg, /<text/);
+  // Text is allowed: it is drawn as real <text> so Office keeps it editable, and
+  // the annotation content (span lengths, callouts, the notice) depends on it.
+  // What must never appear is a rasterised picture of the drawing.
 });
 
 test('SVG export carries no labels but keeps X and TC symbols', () => {
   const scene = buildScene(simple, 'svg');
   const svg = renderSceneToSvg(scene);
   assert.doesNotMatch(svg, /Origin/);
-  assert.doesNotMatch(svg, /<text/);
+  // No Origin or alphabetical label group. Annotation text - the incomplete-data
+  // notice here, since this scene has no measurements - is content and is kept.
+  assert.doesNotMatch(svg, /<g id="labels"/);
   assert.equal((svg.match(/<path /g) ?? []).length, scene.poles.length);
   assert.equal((svg.match(/<polygon /g) ?? []).length, scene.tc.length);
   assert.ok(scene.tc.length >= 1);
@@ -108,9 +112,11 @@ test('PDF output is a real vector PDF with drawing operators', () => {
   assert.doesNotMatch(text, /\/Subtype\s*\/Image/);
   assert.doesNotMatch(text, /\/DCTDecode/);
   assert.doesNotMatch(text, /FlateDecode/, 'uncompressed so operators are inspectable');
-  // Label suppression survives into the file.
+  // The drawing's own labels are suppressed in the file. Annotation text is
+  // content, so a text object is expected here - the incomplete-data notice,
+  // because this scene carries no measurements.
   assert.doesNotMatch(text, /Origin/);
-  assert.doesNotMatch(text, /BT\s/, 'no text object is emitted for an export');
+  assert.match(text, /BT\s/, 'the notice is drawn as real text, not an image');
   assert.equal(primitives.lines, scene.lines.length);
   assert.equal(primitives.tc, scene.tc.length);
   assert.ok(primitives.poles > 0);

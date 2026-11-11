@@ -69,7 +69,9 @@ export function buildAnnotationLayer(input) {
   const toFrame = (point) => ({ x: point.x - padIn, y: point.y - padIn });
   const fromFrame = (point) => ({ x: point.x + padIn, y: point.y + padIn });
 
-  if (!profile.showAnnotations) return { callouts, spans, obstacles: [] };
+  if (!profile.showAnnotations) {
+    return { callouts, spans, obstacles: [], notice: null, completeness: null };
+  }
 
   // The registry is what links measured records to drawn geometry. A load is
   // stored against a node asset id; the registry says which pixel that node has.
@@ -210,10 +212,13 @@ export function buildAnnotationLayer(input) {
     callouts.push(callout);
   }
 
-  // ---- Span labels: one per measured (or defaulted) physical span ----
-  const measuredIds = new Set([...spanLengths.keys()]);
+  // ---- Span labels: one per physical span, measured or not ----
+  //
+  // An unmeasured span is drawn too, with a dash for the number. A span with no
+  // label at all is worse than a span with an honest placeholder: the drawing then
+  // looks finished while a measurement is missing, and nobody reading the sheet
+  // can tell the difference between "not surveyed" and "no span here".
   for (const asset of spanAssets) {
-    if (!measuredIds.has(asset.id)) continue;
     const a = nodeById.get(asset.a);
     const b = nodeById.get(asset.b);
     const pa = nodePixel.get(asset.a);
@@ -222,6 +227,7 @@ export function buildAnnotationLayer(input) {
 
     const record = spanLengths.get(asset.id);
     const lengthM = record && typeof record === 'object' ? record.lengthM : record;
+    const measured = lengthM !== null && lengthM !== undefined && Number.isFinite(Number(lengthM));
     const text = `${formatLength(lengthM)} m`;
     const size = measureBlock([text], config, config.annotSpanFontSize);
     const span = { x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y };
@@ -246,6 +252,7 @@ export function buildAnnotationLayer(input) {
     );
     spanAnnot.a = a;
     spanAnnot.b = b;
+    spanAnnot.measured = measured;
     spans.push(spanAnnot);
     taken.push({
       x1: placement.center.x - size.width / 2,
@@ -255,7 +262,45 @@ export function buildAnnotationLayer(input) {
     });
   }
 
-  return { callouts, spans, obstacles };
+  // ---- The incomplete-data notice ----
+  //
+  // Placed after everything else so it can claim a corner no annotation wanted. It
+  // is deliberately a scene record rather than a DOM element: the preview, the PDF,
+  // the SVG and the print all have to carry it, and the only way to guarantee that
+  // is for all four to draw it from the same source.
+  const totalSpans = spanAssets.length;
+  const measuredCount = spans.filter((span) => span.measured).length;
+  const completeness =
+    totalSpans > 0
+      ? { total: totalSpans, measured: measuredCount, unmeasured: totalSpans - measuredCount }
+      : { total: 0, measured: 0, unmeasured: 0 };
+  let notice = null;
+  if (completeness.unmeasured > 0) {
+    const text = `Span measurements incomplete: ${completeness.unmeasured} of ${completeness.total} spans unmeasured.`;
+    const size = measureBlock([text], config, config.annotSpanFontSize);
+    // Bottom-left of the drawing frame, inside the padding, where a route drawing
+    // is least likely to have content and where a footnote belongs.
+    const pad = 6;
+    const center = {
+      x: bounds.width / 2,
+      y: bounds.height - size.height / 2 - pad,
+    };
+    notice = {
+      id: 'notice:completeness',
+      text,
+      center: fromFrame(center),
+      size,
+      fontSize: config.annotSpanFontSize,
+      boxes: {
+        x1: center.x - size.width / 2 - 4,
+        y1: center.y - size.height / 2 - 3,
+        x2: center.x + size.width / 2 + 4,
+        y2: center.y + size.height / 2 + 3,
+      },
+    };
+  }
+
+  return { callouts, spans, obstacles, notice, completeness };
 }
 
 /** Format a measured length for a label. */

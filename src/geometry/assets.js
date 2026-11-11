@@ -56,6 +56,8 @@
  * The Origin is fixed at the grid origin and cannot be created by a route, so it
  * has a constant id.
  */
+import { spanDesignation } from './designations.js';
+
 export const ORIGIN_NODE = 'origin';
 
 /**
@@ -134,6 +136,11 @@ export function nodeAssetIdForStep(routeId, stepIndex, spanCount) {
  * same point.
  *
  * @param {ReturnType<import('./network.js').buildNetwork>} network Built network.
+ * @param {object} [options]
+ * @param {Map<string, string>} [options.designations] Node asset id -> point
+ *   designation, from `designations.allocateDesignations`. When absent a node's
+ *   designation is the label it is drawn with, so a caller that does not care
+ *   about schedule names still gets a usable one.
  * @returns {{
  *   nodeIds: Map<string, string>,
  *   nodeKeys: Map<string, string>,
@@ -145,7 +152,7 @@ export function nodeAssetIdForStep(routeId, stepIndex, spanCount) {
  *   allSpanAssets(): Array<object>,
  * }}
  */
-export function buildAssetRegistry(network) {
+export function buildAssetRegistry(network, options = {}) {
   /** asset id -> {id, kind, coordKey, x, y, label, nodeType} */
   const nodeAssets = new Map();
   /** coordKey -> asset id */
@@ -161,6 +168,7 @@ export function buildAssetRegistry(network) {
 
   const graph = network.graph;
   const endpoints = network.endpoints ?? [];
+  const designationOf = options.designations ?? null;
 
   /** The display name a node is drawn with, if any. */
   function labelFor(coordKeyValue) {
@@ -196,6 +204,10 @@ export function buildAssetRegistry(network) {
       x: node.x,
       y: node.y,
       label: labelFor(coordKeyValue),
+      // The name a schedule uses. A designation keyed by asset id wins, because it
+      // is what survives an edit; the drawn label is the fallback so a plain caller
+      // still gets a name rather than a blank column.
+      designation: designationOf?.get(assetId) ?? labelFor(coordKeyValue),
       nodeType: kindFor(node),
       isOrigin: Boolean(node.isOrigin),
     });
@@ -249,6 +261,21 @@ export function buildAssetRegistry(network) {
     const existing = [...spanAssets.values()].find((s) => s.id === candidate);
     const canonicalId = existing ? existing.id : candidate;
     if (!existing) {
+      // Orientation is a display decision, not an identity one: a cable has no
+      // intrinsic direction. It is fixed from the first route that walked it, so a
+      // schedule reads `A1 -> A2` the way the drawing was built, and a later route
+      // walking it backwards reuses the same record rather than producing a
+      // mirrored duplicate. Because it is chosen once, it is deterministic.
+      const provenance = (edge.sources ?? [])[0] ?? null;
+      const firstFrom = provenance ? provenance.fromId : null;
+      const firstCoord = provenance ? provenance.fromId : null;
+      // The edge stores canonical (sorted) ends; `fromKey` is the coordinate the
+      // first traversing route started that unit span at, which is what the reader
+      // should see on the left.
+      const startKey = firstTraversalCoord(provenance, edge);
+      const forward = startKey === null || startKey === edge.a;
+      const fromAsset = forward ? aAsset : bAsset;
+      const toAsset = forward ? bAsset : aAsset;
       spanAssets.set(candidate, {
         id: candidate,
         kind: 'span',
@@ -257,10 +284,25 @@ export function buildAssetRegistry(network) {
         coordKey: edge.key,
         fromKey: edge.a,
         toKey: edge.b,
+        // Display orientation and names. `from`/`to` are asset ids, and the
+        // designations are filled in below, once every node is named.
+        from: fromAsset,
+        to: toAsset,
+        fromNodeId: fromAsset,
+        toNodeId: toAsset,
       });
     }
     edgeIds.set(edge.key, canonicalId);
     if (canonicalId !== candidate) edgeAliases.set(candidate, canonicalId);
+  }
+
+  // Give every span its readable name now that every pole has one. The two halves
+  // come from the endpoint designations, so renaming a pole changes the span's
+  // display name while its id - the key everything is stored against - does not.
+  for (const span of spanAssets.values()) {
+    span.fromDesignation = nodeAssets.get(span.fromNodeId)?.designation ?? null;
+    span.toDesignation = nodeAssets.get(span.toNodeId)?.designation ?? null;
+    span.designation = spanDesignation(span.fromDesignation, span.toDesignation);
   }
 
   return {
@@ -295,6 +337,28 @@ export function buildAssetRegistry(network) {
       return nodeIds.get(String(id)) ?? null;
     },
   };
+}
+
+/**
+ * The coordinate a unit span was first walked from.
+ *
+ * The canonical edge stores its two ends sorted, which says nothing about which
+ * way the drawing was built. The first provenance record does, so this is how a
+ * span decides which end belongs on the left of its schedule row. Returns null
+ * when there is no provenance, in which case the canonical order is used.
+ *
+ * @param {object|null} provenance First traversal record on the edge.
+ * @param {object} edge Canonical edge record.
+ * @returns {string|null} Coordinate key of the traversal's starting end.
+ */
+function firstTraversalCoord(provenance, edge) {
+  if (!provenance) return null;
+  // The provenance records which direction was walked and where from, but not the
+  // resolved coordinate pair. The edge's own ends are the candidates, so the one
+  // that matches the route's current cursor is reported; failing that the
+  // canonical order is kept rather than inventing a third answer.
+  if (provenance.fromKey) return provenance.fromKey;
+  return null;
 }
 
 /**

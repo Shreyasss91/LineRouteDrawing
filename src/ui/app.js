@@ -1124,6 +1124,14 @@ function setupPreviewInteraction() {
   // the annotation with it rather than leaving it stranded.
   let drag = null;
 
+  /** Find the annotation record currently drawn for an asset, from the live scene. */
+  function annotationFor(kind, assetId) {
+    const anns = current.scene?.annotations;
+    if (!anns) return null;
+    const list = kind === 'load' ? anns.callouts : anns.spans;
+    return list?.find((a) => a.assetId === assetId) ?? null;
+  }
+
   dom.canvas.addEventListener('pointerdown', (event) => {
     const group = event.target.closest?.('[data-annot-id]');
     if (!group) return;
@@ -1136,11 +1144,20 @@ function setupPreviewInteraction() {
     const start = { x: event.clientX, y: event.clientY };
     const existing =
       kind === 'load' ? state.loadPlacements[assetId] : state.spanPlacements[assetId];
+    // The position the label is drawn at right now, and which candidate the
+    // automatic pass chose to put it there. Both are recorded so the offset is
+    // measured from what the reader sees: dragging a label that the layout placed
+    // on the pole's left must move it from the left, not from the first candidate.
+    const drawn = annotationFor(kind, assetId);
     drag = {
       kind,
       assetId,
       start,
       base: { dx: existing?.dx ?? 0, dy: existing?.dy ?? 0 },
+      ci: existing?.candidateIndex ?? drawn?.candidateIndex ?? 0,
+      // Scene-space position at the moment the drag began, so zoom never bends the
+      // distance the pointer travelled.
+      origin: drawn ? { x: drawn.center.x, y: drawn.center.y } : null,
       moved: false,
     };
     dom.canvas.style.cursor = 'grabbing';
@@ -1150,12 +1167,19 @@ function setupPreviewInteraction() {
   dom.canvas.addEventListener('pointermove', (event) => {
     if (!drag) return;
     const scale = view.zoom || 1;
+    // Pointer travel in pixels, divided by the zoom, is the distance in scene
+    // units. Accumulating that onto the base offset keeps a zoomed-out drag from
+    // moving two and a half times as far as the cursor did.
     const dx = drag.base.dx + (event.clientX - drag.start.x) / scale;
     const dy = drag.base.dy + (event.clientY - drag.start.y) / scale;
     if (Math.abs(dx - drag.base.dx) > 0.5 || Math.abs(dy - drag.base.dy) > 0.5) drag.moved = true;
     const target = drag.kind === 'load' ? 'loadPlacements' : 'spanPlacements';
-    // Live feedback while dragging, without persisting on every pointer move.
-    state[target] = { ...state[target], [drag.assetId]: { dx, dy } };
+    // Live feedback while dragging, without persisting on every pointer move. The
+    // candidate index travels with the offset so a redraw keeps the same anchor.
+    state[target] = {
+      ...state[target],
+      [drag.assetId]: { dx, dy, candidateIndex: drag.ci },
+    };
     recompute();
     renderPreview();
   });

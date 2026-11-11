@@ -287,6 +287,10 @@ export function buildNetwork(routes, options = {}) {
         fromId: source.id,
         direction,
         spanIndex: span,
+        // The coordinate this unit span starts at. It is what fixes the span's
+        // display orientation to the way the drawing was built, so a schedule row
+        // reads in the direction the user laid the cable down.
+        fromKey: coordKey(cursor),
       });
       cursor = next;
       path.push(cursor);

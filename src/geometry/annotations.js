@@ -250,34 +250,53 @@ export function placeCallout(input) {
 
   const candidates = loadCandidates(node, size, config).map((candidate) => ({
     ...candidate,
-    center: { x: node.x + candidate.dx + offset.dx, y: node.y + candidate.dy + offset.dy },
+    center: { x: node.x + candidate.dx, y: node.y + candidate.dy },
   }));
 
   // A manual offset says where the user wants it. Honour it exactly rather than
   // searching: they moved it because the automatic place was wrong for their
   // drawing, and re-running collision avoidance would undo their decision.
+  //
+  // It is applied to the candidate the label was actually on, not to the first
+  // candidate in the list. Using the first one made a callout that had been
+  // automatically placed on its left-hand side jump across the pole the instant it
+  // was touched, because the offset was measured from a position the reader had
+  // never seen.
   if (manual) {
-    const first = candidates[0];
+    const base = candidates[clampIndex(offset.candidateIndex, candidates.length)];
+    const center = { x: base.center.x + offset.dx, y: base.center.y + offset.dy };
     return {
-      center: first.center,
-      side: first.side,
-      collisions: countCollisions(first.center, size, obstacles, taken, bounds, config),
+      center,
+      side: base.side,
+      candidateIndex: clampIndex(offset.candidateIndex, candidates.length),
+      collisions: countCollisions(center, size, obstacles, taken, bounds, config),
       manual: true,
     };
   }
 
   let best = null;
-  for (const candidate of candidates) {
+  let bestIndex = 0;
+  candidates.forEach((candidate, index) => {
     const collisions = countCollisions(candidate.center, size, obstacles, taken, bounds, config);
-    if (collisions === 0) {
-      return { center: candidate.center, side: candidate.side, collisions: 0, manual: false };
+    if (!best || collisions < best.collisions) {
+      best = { ...candidate, collisions };
+      bestIndex = index;
     }
-    if (!best || collisions < best.collisions) best = { ...candidate, collisions };
+  });
+  if (best && best.collisions === 0) {
+    return {
+      center: best.center,
+      side: best.side,
+      candidateIndex: bestIndex,
+      collisions: 0,
+      manual: false,
+    };
   }
 
   return {
     center: best.center,
     side: best.side,
+    candidateIndex: bestIndex,
     collisions: best.collisions,
     manual: false,
   };
@@ -304,36 +323,54 @@ export function placeSpanLabel(input) {
   const candidates = spanCandidates(span, size, config).map((candidate) => ({
     ...candidate,
     center: {
-      x: candidate.midX + candidate.dx + offset.dx,
-      y: candidate.midY + candidate.dy + offset.dy,
+      x: candidate.midX + candidate.dx,
+      y: candidate.midY + candidate.dy,
     },
   }));
 
+  // Same rule as a callout: the nudge is measured from the candidate that was
+  // actually shown, so the first drag moves the label from where it was drawn.
   if (manual) {
-    const first = candidates[0];
+    const index = clampIndex(offset.candidateIndex, candidates.length);
+    const base = candidates[index];
+    const center = { x: base.center.x + offset.dx, y: base.center.y + offset.dy };
     return {
-      center: first.center,
-      side: first.side,
-      collisions: countCollisions(first.center, size, obstacles, taken, bounds, config),
+      center,
+      side: base.side,
+      candidateIndex: index,
+      collisions: countCollisions(center, size, obstacles, taken, bounds, config),
       manual: true,
     };
   }
 
   let best = null;
-  for (const candidate of candidates) {
+  let bestIndex = 0;
+  candidates.forEach((candidate, index) => {
     const collisions = countCollisions(candidate.center, size, obstacles, taken, bounds, config);
-    if (collisions === 0) {
-      return { center: candidate.center, side: candidate.side, collisions: 0, manual: false };
+    if (!best || collisions < best.collisions) {
+      best = { ...candidate, collisions };
+      bestIndex = index;
     }
-    if (!best || collisions < best.collisions) best = { ...candidate, collisions };
-  }
-
+  });
   return {
     center: best.center,
     side: best.side,
+    candidateIndex: bestIndex,
     collisions: best.collisions,
     manual: false,
   };
+}
+
+/**
+ * Keep a stored candidate index inside the candidate list.
+ *
+ * A saved project may have been written when the list had a different length, so
+ * an out-of-range index falls back to the first candidate rather than reading
+ * `undefined` and drawing at NaN.
+ */
+function clampIndex(value, length) {
+  if (!Number.isInteger(value) || value < 0 || value >= length) return 0;
+  return value;
 }
 
 /** Count how many obstacles a candidate box overlaps. */
@@ -378,6 +415,10 @@ export function annotation(placement, id, kind, assetId, lines, fontSize) {
     lines,
     center: placement.center,
     side: placement.side,
+    // Which candidate the automatic pass settled on. A drag records this alongside
+    // the offset, so the nudge is measured from the position the reader saw rather
+    // than from a fixed first choice.
+    candidateIndex: placement.candidateIndex ?? 0,
     collisions: placement.collisions,
     manual: placement.manual,
     fontSize,
