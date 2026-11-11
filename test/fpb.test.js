@@ -235,3 +235,57 @@ test('an unknown origin marker kind falls back to a pole', () => {
   );
   assert.equal(network.originMarker, 'plain');
 });
+
+test('the TC triangle is drawn at the doubled marker size', () => {
+  const network = buildNetwork([
+    { id: 'r1', from: 'origin', direction: 'south', spans: 1, tc: true },
+    { id: 'r2', from: 'origin', direction: 'east', spans: 1, tc: false },
+  ]);
+  const config = createConfig();
+  const scene = buildScene(network, 'preview');
+  assert.equal(scene.tc[0].halfWidth, config.tcMarkerSize, 'half-width uses the configured size');
+  assert.equal(scene.tc[0].height, config.tcMarkerHeight, 'height uses the configured size');
+  assert.equal(config.tcMarkerSize, 12);
+  assert.equal(config.tcMarkerHeight, 20);
+  // The triangle is visibly larger than an X arm, so the two read differently.
+  assert.ok(scene.tc[0].height > scene.poles[0].size * 2);
+});
+
+test('the TC triangle shrinks with the spacing and never reaches the next pole', () => {
+  const network = buildNetwork([
+    { id: 'r1', from: 'origin', direction: 'south', spans: 1, tc: true },
+    { id: 'r2', from: 'origin', direction: 'east', spans: 1, tc: false },
+  ]);
+  for (const spanLength of [12, 16, 20, 24, 30, 40, 60, 80]) {
+    const scene = buildScene(network, 'preview', { spanLength });
+    const triangle = scene.tc[0];
+    const top = triangle.y + triangle.halfWidth * 0.35;
+    const bottom = top + triangle.height;
+    const below = scene.poles.filter((p) => p.y > triangle.y).sort((a, b) => a.y - b.y)[0];
+    const above = scene.poles.filter((p) => p.y < triangle.y).sort((a, b) => b.y - a.y)[0];
+    if (below) assert.ok(bottom < below.y, `triangle clears the pole below at span ${spanLength}`);
+    if (above) assert.ok(top > above.y, `triangle clears the pole above at span ${spanLength}`);
+  }
+  // At the default spacing the full configured size is used.
+  const atDefault = buildScene(network, 'preview').tc[0];
+  assert.equal(atDefault.height, createConfig().tcMarkerHeight);
+});
+
+test('the TC triangle size also applies to PDF and SVG output', () => {
+  const network = buildNetwork([
+    { id: 'r1', from: 'origin', direction: 'south', spans: 1, tc: true },
+    { id: 'r2', from: 'origin', direction: 'east', spans: 1, tc: false },
+  ]);
+  const svg = buildScene(network, 'svg');
+  const pdf = buildScene(network, 'pdf');
+  assert.equal(svg.tc[0].height, pdf.tc[0].height);
+  assert.equal(svg.tc[0].height, createConfig().tcMarkerHeight);
+
+  const svgMarkup = renderSceneToSvg(svg, { standalone: false });
+  const points = /<polygon[^>]*points="([^"]+)"/.exec(svgMarkup)?.[1];
+  assert.ok(points, 'the polygon is present');
+  const [, , bottomLeft] = points.trim().split(/\s+/);
+  const bottomY = Number(bottomLeft.split(',')[1]);
+  const topY = Number(points.trim().split(/\s+/)[0].split(',')[1]);
+  assert.ok(Math.abs(bottomY - topY - svg.tc[0].height) < 0.05, 'the drawn height matches the primitive');
+});

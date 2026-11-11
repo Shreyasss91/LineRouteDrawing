@@ -309,6 +309,37 @@ record(
   JSON.stringify(markerOverlap),
 );
 
+const tcSize = await page.evaluate(() => {
+  const svg = document.querySelector('#preview-canvas svg');
+  const pts = svg
+    .querySelector('#tc-markers polygon')
+    .getAttribute('points')
+    .trim()
+    .split(/\s+/)
+    .map((pair) => pair.split(',').map(Number));
+  const apexY = pts[0][1];
+  const baseY = pts[1][1];
+  const cx = pts[0][0];
+  const poles = [...svg.querySelectorAll('#pole-markers path')].map((el) => {
+    const n = el.getAttribute('d').match(/-?\d+(\.\d+)?/g).map(Number);
+    return { x: (n[0] + n[2]) / 2, y: (n[1] + n[3]) / 2, half: Math.abs(n[2] - n[0]) / 2 };
+  });
+  const column = poles.filter((q) => Math.abs(q.x - cx) < 1).sort((a, b) => a.y - b.y);
+  const above = column.filter((q) => q.y < apexY).pop();
+  const below = column.find((q) => q.y > baseY);
+  return {
+    height: +(baseY - apexY).toFixed(1),
+    width: +Math.abs(pts[1][0] - pts[2][0]).toFixed(1),
+    gapAbove: above ? +(apexY - (above.y + above.half)).toFixed(1) : null,
+    gapBelow: below ? +((below.y - below.half) - baseY).toFixed(1) : null,
+  };
+});
+record(
+  'the TC triangle is drawn at the doubled size without reaching a pole',
+  tcSize.height === 20 && tcSize.width === 24 && tcSize.gapAbove > 0 && tcSize.gapBelow > 0,
+  JSON.stringify(tcSize),
+);
+
 // ---- 15. the From field preselects the most recently created endpoint ----
 const preselected = await page.evaluate(() => {
   const select = document.querySelector('#field-from');

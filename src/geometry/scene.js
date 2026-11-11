@@ -111,6 +111,14 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
   const nodes = nodeList(network.graph);
   const toPixel = (coord) => gridToPixel(coord, bbox, config.spanLength, offset);
 
+  // Keep the TC triangle inside one span however the spacing is set, so a
+  // marker can never overlap the neighbouring pole. At and above the default
+  // spacing this is 1 and the configured size is used unchanged.
+  const tcScale = Math.min(
+    1,
+    (config.spanLength * config.tcMaxSpanFraction) / config.tcMarkerHeight,
+  );
+
   const lines = [];
   const poles = [];
   const tc = [];
@@ -161,8 +169,8 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
         id: `tc:${node.key}`,
         x: p.x,
         y: p.y,
-        halfWidth: config.tcMarkerSize,
-        height: config.tcMarkerHeight,
+        halfWidth: config.tcMarkerSize * tcScale,
+        height: config.tcMarkerHeight * tcScale,
         name: node.tcName,
       });
     }

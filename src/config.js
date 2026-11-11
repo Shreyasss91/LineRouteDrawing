@@ -128,10 +128,17 @@ export const DEFAULT_CONFIG = Object.freeze({
   poleMarkerSize: 4.5,
   /** Stroke width of route lines in px. */
   lineWidth: 1.6,
-  /** Half-width of the TC triangle base in px. */
-  tcMarkerSize: 6,
-  /** Height of the TC triangle in px. */
-  tcMarkerHeight: 10,
+  /** Half-width of the TC triangle base in px, at the default span length. */
+  tcMarkerSize: 12,
+  /** Height of the TC triangle in px, at the default span length. */
+  tcMarkerHeight: 20,
+  /**
+   * Largest share of one span the TC triangle may occupy vertically. When the
+   * spacing is reduced the triangle shrinks with it, so a marker can never
+   * reach the next pole. It is capped so the default size is used at the
+   * default spacing and above.
+   */
+  tcMaxSpanFraction: 0.75,
   /** Font size used for the FPB label inside its box, in px. */
   fpbFontSize: 11,
   /** Horizontal padding inside the FPB box, in px. */
