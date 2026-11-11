@@ -14,6 +14,13 @@ import { buildScene } from '../geometry/scene.js';
 import { createSpanLengths } from '../data/schedules.js';
 import { createNetworkPanel } from './network_panel.js';
 import { buildAssetRegistry, spanAssetId } from '../geometry/assets.js';
+import { allocateDesignations } from '../geometry/designations.js';
+import {
+  buildDesignationOverlay,
+  buildSelectionRing,
+  composeMiniPreview,
+  fitViewBox,
+} from './mini_preview.js';
 import { checkSpanClearance, requiredSpanLength } from '../geometry/clearance.js';
 import {
   parseProjectJson,
@@ -86,6 +93,8 @@ const dom = {
   svg: el('btn-svg'),
   print: el('btn-print'),
   exportStatus: el('export-status'),
+  miniPreview: el('mini-preview'),
+  openFullPreview: el('btn-open-full-preview'),
 };
 
 const state = createState();
@@ -462,8 +471,17 @@ async function loadProjectFile(file) {
  */
 function recompute() {
   const network = buildNetwork(state.routes, { originMarker: state.originMarker });
+  // Names first, then geometry that carries them. The allocation is seeded with the
+  // designations the project already stores, so a reload continues the numbering and
+  // a pole is never renamed behind the user's back.
+  const allocation = allocateDesignations(network, {
+    nodeDesignations: state.nodeDesignations,
+    counters: state.designationCounters,
+  });
+  state.nodeDesignations = allocation.nodeDesignations;
+  state.designationCounters = allocation.counters;
   const scene = buildScene(network, 'preview', { spanLength: state.spanLength }, measuredData());
-  const registry = buildAssetRegistry(network);
+  const registry = buildAssetRegistry(network, { designations: allocation.nodeDesignations });
 
   // Scene primitive id -> asset id.
   const nodeForPole = new Map();
@@ -497,7 +515,15 @@ function recompute() {
     if (spanId) spanForLine.set(`line:${edge.key}`, spanId);
   }
 
-  current = { network, scene, registry, nodeForPole, nodePositions, spanForLine };
+  current = {
+    network,
+    scene,
+    registry,
+    nodeForPole,
+    nodePositions,
+    spanForLine,
+    designations: allocation.nodeDesignations,
+  };
   return current;
 }
 
@@ -538,6 +564,95 @@ function renderPreview() {
   addHitAreas();
   applyHighlight();
   applyView();
+  renderMiniPreview();
+}
+
+/**
+ * Draw the compact reference copy beside the schedules.
+ *
+ * Same scene, same renderer, one extra overlay: the point designations, which are
+ * what the schedule rows are matched against. A fitted viewBox shows the whole
+ * drawing at whatever size the panel happens to be.
+ */
+function renderMiniPreview() {
+  if (!dom.miniPreview) return;
+  const { scene } = current;
+  if (!scene || scene.lines.length === 0) {
+    dom.miniPreview.innerHTML =
+      '<p class="mini-preview-empty">Add a route to see the drawing here.</p>';
+    return;
+  }
+
+  // The span positions, so a selected span can be ringed. Built from the same node
+  // positions used for selection everywhere else.
+  const spanSegments = new Map();
+  for (const line of scene.lines) {
+    const spanId = current.spanForLine?.get(line.parentId);
+    if (spanId) {
+      spanSegments.set(spanId, { x1: line.x1, y1: line.y1, x2: line.x2, y2: line.y2 });
+    }
+  }
+
+  // The labels must end up a readable size on screen, and the drawing is shrunk to
+  // fit the panel, so the font has to grow by exactly that shrink factor. The panel
+  // fits the larger of the two dimensions, so the factor is whichever of width or
+  // height is tighter.
+  const panelWidth = dom.miniPreview.clientWidth || 356;
+  const panelHeight = dom.miniPreview.clientHeight || 406;
+  const shrink = Math.max(
+    scene.width / Math.max(1, panelWidth),
+    scene.height / Math.max(1, panelHeight),
+  );
+  // Aim for roughly 9 px of rendered text, and never explode the font on a huge
+  // network, which would turn the panel into overlapping blocks.
+  const fontScale = Math.min(6, Math.max(1, (9 / scene.config.miniDesignationFontSize) * shrink));
+
+  const overlay = buildDesignationOverlay({
+    nodes: current.registry?.allNodeAssets() ?? [],
+    positions: current.nodePositions,
+    config: scene.config,
+    escapeText: escapeForSvgText,
+    fontScale,
+  });
+  const ring = buildSelectionRing({
+    selection: miniSelection,
+    positions: current.nodePositions,
+    spans: spanSegments,
+    config: scene.config,
+  });
+
+  dom.miniPreview.innerHTML = composeMiniPreview({
+    sceneSvg: renderSceneToSvg(scene, { standalone: false }),
+    viewBox: fitViewBox(scene),
+    overlay,
+    ring,
+  });
+}
+
+/** What the compact reference is currently highlighting. */
+let miniSelection = null;
+
+/**
+ * Highlight a node or span in the compact reference.
+ *
+ * Kept separate from the main preview's highlight so selecting a row scrolls
+ * nothing and changes no full-size drawing state.
+ *
+ * @param {'node'|'span'|null} kind Kind of object, or null to clear.
+ * @param {string} [id] Asset id.
+ */
+function highlightMini(kind, id) {
+  miniSelection = kind && id ? { kind, id } : null;
+  renderMiniPreview();
+}
+
+/** Escape text for safe inclusion in SVG markup. */
+function escapeForSvgText(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 /**
@@ -1290,6 +1405,13 @@ function setupEventListeners() {
     dom.projectFile.value = '';
   });
 
+  // "Open the full drawing" is a convenience: the compact reference is a reference,
+  // so the way out of it is one click and it does not disturb the schedules.
+  dom.openFullPreview?.addEventListener('click', () => {
+    dom.stage?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    dom.stage?.focus?.();
+  });
+
   dom.spacing.addEventListener('change', () => {
     const value = Number(dom.spacing.value);
     if (!Number.isFinite(value)) return;
@@ -1334,8 +1456,17 @@ function boot() {
     getState: () => state,
     getNetwork: () => current.network,
     onChange: (patch) => applyMeasuredChange(patch),
-    onSelectNode: (nodeId) => highlightNode(nodeId),
-    onSelectSpan: (spanId) => highlightSpan(spanId),
+    // Selecting a row marks the thing in both drawings: the full-size one so the
+    // user can see the context, and the compact one right beside the table so they
+    // do not lose their place in it.
+    onSelectNode: (nodeId) => {
+      highlightNode(nodeId);
+      highlightMini('node', nodeId);
+    },
+    onSelectSpan: (spanId) => {
+      highlightSpan(spanId);
+      highlightMini('span', spanId);
+    },
     notify: (message) => notify(message),
   });
 

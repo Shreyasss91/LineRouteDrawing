@@ -113,20 +113,43 @@ export function createNetworkPanel(options) {
   const state = () => getState();
   const network = () => getNetwork();
 
+  /**
+   * A registry for the current drawing, carrying its point designations.
+   *
+   * The designations are authored data held in state, so the panel reads them from
+   * there rather than re-deriving names. If it derived them it could disagree with
+   * the drawing, and a schedule that names a pole differently from the picture is
+   * worse than one that names it by its internal id.
+   */
+  function registry() {
+    return buildAssetRegistry(network(), { designations: state().nodeDesignations });
+  }
+
   /** Node assets for the current drawing, in a stable order. */
   function nodeAssets() {
-    return buildAssetRegistry(network()).allNodeAssets();
+    return registry().allNodeAssets();
   }
 
   /** Span assets for the current drawing. */
   function spanAssets() {
-    return buildAssetRegistry(network()).allSpanAssets();
+    return registry().allSpanAssets();
   }
 
-  /** The label shown for a node asset, which is what a person recognises. */
+  /**
+   * The designation shown for a node asset: `A1`, `Origin:2`, `FPB1`.
+   *
+   * Falls back to the drawn label and finally to the id, so a row is never blank
+   * even if a name is somehow missing.
+   */
   function nodeLabel(id) {
     const asset = nodeAssets().find((a) => a.id === id);
-    return asset ? asset.label ?? asset.id : id;
+    return asset ? asset.designation ?? asset.label ?? asset.id : id;
+  }
+
+  /** The designation shown for a span: `A1–A2`, `Origin–Origin:1`. */
+  function spanLabel(id) {
+    const asset = spanAssets().find((a) => a.id === id);
+    return asset ? asset.designation ?? asset.id : id;
   }
 
   /** Download text as a file. */
@@ -447,7 +470,9 @@ export function createNetworkPanel(options) {
       // The stable id is what the record is stored against; the label is what the
       // user recognises. Showing both prevents picking the wrong "C" on a drawing
       // that has two of them.
-      option.textContent = `${node.label ?? node.id} (${node.id})`;
+      // The designation is what the schedule shows for this point, so it is what the
+      // picker shows first; the id follows so a record can be traced to the file.
+      option.textContent = `${node.designation ?? node.label ?? node.id} (${node.id})`;
       dom.loadNode.appendChild(option);
     }
     if (nodes.some((n) => n.id === previous)) dom.loadNode.value = previous;
@@ -475,9 +500,24 @@ export function createNetworkPanel(options) {
       const orphan = !known.has(load.nodeId);
       if (orphan) row.classList.add('is-unresolved');
 
+      // Point: the designation a person says out loud. This is the column the
+      // schedule is read by, so it comes first.
       const pointCell = document.createElement('td');
-      pointCell.textContent = orphan ? `${load.nodeId} (missing)` : nodeLabel(load.nodeId);
+      pointCell.textContent = orphan ? '— (missing)' : nodeLabel(load.nodeId);
+      pointCell.className = 'point-designation';
       row.appendChild(pointCell);
+
+      // Internal node id: what the record is actually stored against. Shown beside
+      // the name so a reassignment can be checked against the file, and so nobody
+      // can mistake a name for an identity.
+      const nodeIdCell = document.createElement('td');
+      nodeIdCell.textContent = load.nodeId;
+      nodeIdCell.className = 'mono-id';
+      row.appendChild(nodeIdCell);
+
+      const typeCell = document.createElement('td');
+      typeCell.textContent = orphan ? '—' : (known.get(load.nodeId)?.nodeType ?? '—');
+      row.appendChild(typeCell);
 
       const idCell = document.createElement('td');
       idCell.textContent = load.id;
@@ -576,8 +616,9 @@ export function createNetworkPanel(options) {
       dom.spanRows.appendChild(
         spanRow({
           spanId: span.id,
-          from: nodes.get(span.a)?.label ?? span.a,
-          to: nodes.get(span.b)?.label ?? span.b,
+          designation: span.designation,
+          from: nodes.get(span.fromNodeId ?? span.a)?.designation ?? span.a,
+          to: nodes.get(span.toNodeId ?? span.b)?.designation ?? span.b,
           record,
           orphan: false,
         }),
@@ -587,6 +628,7 @@ export function createNetworkPanel(options) {
       dom.spanRows.appendChild(
         spanRow({
           spanId: record.spanId,
+          designation: '— (not in drawing)',
           from: '—',
           to: '—',
           record,
@@ -597,11 +639,17 @@ export function createNetworkPanel(options) {
   }
 
   /** One row of the span table. */
-  function spanRow({ spanId, from, to, record, orphan }) {
+  function spanRow({ spanId, designation, from, to, record, orphan }) {
     const row = document.createElement('tr');
     row.dataset.span = spanId;
     if (spanId === selectedSpanId) row.classList.add('is-selected');
     if (orphan) row.classList.add('is-unresolved');
+
+    // The readable name of the cable, which is how a row is found in the table.
+    const nameCell = document.createElement('td');
+    nameCell.textContent = designation;
+    nameCell.className = 'span-designation';
+    row.appendChild(nameCell);
 
     const idCell = document.createElement('td');
     idCell.textContent = spanId;

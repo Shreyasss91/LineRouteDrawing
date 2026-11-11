@@ -114,6 +114,11 @@
           <div class="network-summary" id="network-summary" aria-live="polite"></div>
         </div>
 
+        <!-- The schedules read on the left; a compact copy of the drawing sits on the
+             right so a row can be matched to a pole without leaving the table. -->
+        <div class="network-layout">
+        <div class="network-main">
+
         <div class="network-tabs" role="tablist" aria-label="Network data sections">
           <button type="button" class="tab is-active" role="tab" id="tab-loads"
                   aria-selected="true" aria-controls="panel-loads">Node loads</button>
@@ -153,6 +158,8 @@
               <thead>
                 <tr>
                   <th scope="col">Point</th>
+                  <th scope="col">Internal node ID</th>
+                  <th scope="col">Type</th>
                   <th scope="col">Load ID</th>
                   <th scope="col">Value</th>
                   <th scope="col">Unit</th>
@@ -189,7 +196,8 @@
             <table>
               <thead>
                 <tr>
-                  <th scope="col">Span ID</th>
+                  <th scope="col">Span</th>
+                  <th scope="col">Internal span ID</th>
                   <th scope="col">From</th>
                   <th scope="col">To</th>
                   <th scope="col">Length (m)</th>
@@ -224,6 +232,24 @@
             <button type="button" id="btn-import-cancel" class="btn">Cancel</button>
           </div>
         </div>
+
+        </div><!-- /network-main -->
+
+        <aside class="network-preview" aria-label="Drawing reference">
+          <div class="network-preview-head">
+            <h3>Drawing reference</h3>
+            <button type="button" id="btn-open-full-preview" class="btn btn-small">
+              Open the full drawing
+            </button>
+          </div>
+          <div id="mini-preview" class="mini-preview" aria-live="polite"></div>
+          <p class="network-preview-note">
+            Point names and span lengths, matching the schedules. Selecting a row
+            highlights it here.
+          </p>
+        </aside>
+
+        </div><!-- /network-layout -->
 
         <div id="unresolved-bar" class="unresolved-bar" role="alert" hidden>
           <p id="unresolved-text"></p>

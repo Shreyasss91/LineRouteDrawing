@@ -208,6 +208,15 @@ export const DEFAULT_CONFIG = Object.freeze({
   annotSpanGap: 7,
   /** Draw a white halo behind annotation text, so a line under it stays legible. */
   annotHalo: true,
+
+  /* ---- Network Data reference panel -------------------------------- */
+  /**
+   * Font size of the point designations in the compact reference drawing.
+   *
+   * Smaller than an annotation, because the panel is a reference rather than the
+   * drawing itself, but large enough to read without zooming.
+   */
+  miniDesignationFontSize: 7,
 });
 
 /** The example configuration from the handwritten reference drawing. */

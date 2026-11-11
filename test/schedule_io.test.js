@@ -35,16 +35,19 @@ import {
   setSpanLength,
 } from '../src/data/schedules.js';
 
+// Designations are the name a schedule reads by, so the fixtures carry them. The
+// label is the drawn label and is deliberately different from the designation here,
+// so a test that accidentally prints the wrong one fails instead of passing.
 const NODES = [
-  { id: 'origin', label: 'Origin', nodeType: 'origin' },
-  { id: 'dst:r1', label: 'A', nodeType: 'pole' },
-  { id: 'mid:r1:0', label: 'B', nodeType: 'pole' },
-  { id: 'dst:r2', label: 'FPB', nodeType: 'fpb' },
+  { id: 'origin', label: 'Origin', designation: 'Origin', nodeType: 'origin' },
+  { id: 'dst:r1', label: 'A', designation: 'A', nodeType: 'pole' },
+  { id: 'mid:r1:0', label: 'B', designation: 'A1', nodeType: 'pole' },
+  { id: 'dst:r2', label: 'FPB', designation: 'FPB', nodeType: 'fpb' },
 ];
 
 const SPANS = [
-  { id: 'origin~dst:r1', a: 'origin', b: 'dst:r1' },
-  { id: 'dst:r1~mid:r1:0', a: 'dst:r1', b: 'mid:r1:0' },
+  { id: 'origin~dst:r1', a: 'origin', b: 'dst:r1', fromNodeId: 'origin', toNodeId: 'dst:r1', designation: 'Origin–A' },
+  { id: 'dst:r1~mid:r1:0', a: 'dst:r1', b: 'mid:r1:0', fromNodeId: 'dst:r1', toNodeId: 'mid:r1:0', designation: 'A–A1' },
 ];
 
 const lookupNode = (id) => NODES.find((n) => n.id === id) ?? null;
@@ -124,8 +127,18 @@ test('10. the span schedule lists one row per unique span', () => {
   const rows = parseDelimited(spanLengthsToCsv(SPANS, lengths, lookupNode));
   assert.deepEqual(rows[0], [...SPAN_LENGTH_COLUMNS]);
   assert.equal(rows.length, 3, 'header plus two spans');
-  assert.deepEqual(rows[1], ['origin~dst:r1', 'origin', 'dst:r1', 'Origin', 'A', '28']);
-  assert.equal(rows[2][5], '', 'an unmeasured span is blank, not zero');
+  // The readable name comes first, then the identity, then the two ends in the order
+  // the span was drawn, then the length.
+  assert.deepEqual(rows[1], [
+    'origin~dst:r1',
+    'Origin–A',
+    'origin',
+    'dst:r1',
+    'Origin',
+    'A',
+    '28',
+  ]);
+  assert.equal(rows[2][6], '', 'an unmeasured span is blank, not zero');
 });
 
 test('11. TSV export is a spreadsheet-ready block', () => {

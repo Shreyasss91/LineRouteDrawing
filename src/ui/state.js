@@ -97,6 +97,14 @@ export function createState(exampleRoutes = []) {
     spanLengths: createSpanLengths(),
     loadPlacements: {},
     spanPlacements: {},
+    /**
+     * Network point designations. This is authored data, not derived geometry: a
+     * pole's name is decided once, stored, and never recomputed behind the user's
+     * back. `designationCounters` remembers how far each source's sequence had run,
+     * so a reload continues at the next number instead of restating the old ones.
+     */
+    nodeDesignations: new Map(),
+    designationCounters: new Map(),
   };
 }
 

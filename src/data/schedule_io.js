@@ -151,6 +151,21 @@ function fieldAt(row, index, name) {
   return String(row[at] ?? '').trim();
 }
 
+/**
+ * The readable name of a node or span asset.
+ *
+ * One name is written into every file the tool produces, so a spreadsheet column
+ * always reads `A1` or `Origin:2` rather than a blank where a name should be. The
+ * internal id is a separate column, never a substitute for this.
+ *
+ * @param {object|null} asset Asset record carrying a designation.
+ * @returns {string} Designation, then label, then empty.
+ */
+function designationOf(asset) {
+  if (!asset) return '';
+  return asset.designation ?? asset.label ?? '';
+}
+
 /* ------------------------------------------------------------------ */
 /* Node load schedule                                                  */
 /* ------------------------------------------------------------------ */
@@ -158,7 +173,7 @@ function fieldAt(row, index, name) {
 /** Column order of the node load file. */
 export const NODE_LOAD_COLUMNS = Object.freeze([
   'nodeId',
-  'pointLabel',
+  'pointDesignation',
   'nodeType',
   'loadId',
   'value',
@@ -187,13 +202,13 @@ export function nodeLoadRows(nodeAssets, loads, isEligible) {
     if (!isEligible(asset.nodeType)) continue;
     const mine = loads.filter((load) => load.nodeId === asset.id);
     if (mine.length === 0) {
-      rows.push([asset.id, asset.label ?? '', asset.nodeType, '', '', '']);
+      rows.push([asset.id, designationOf(asset), asset.nodeType, '', '', '']);
       continue;
     }
     for (const load of mine) {
       rows.push([
         asset.id,
-        asset.label ?? '',
+        designationOf(asset),
         asset.nodeType,
         load.id,
         load.value,
@@ -224,10 +239,11 @@ export function nodeLoadsToTsv(nodeAssets, loads, isEligible) {
 /** Column order of the span length file. */
 export const SPAN_LENGTH_COLUMNS = Object.freeze([
   'spanId',
+  'spanDesignation',
   'fromNodeId',
   'toNodeId',
-  'fromLabel',
-  'toLabel',
+  'fromDesignation',
+  'toDesignation',
   'lengthM',
 ]);
 
@@ -247,15 +263,18 @@ export const SPAN_LENGTH_FILE = 'span_lengths.csv';
  */
 export function spanLengthRows(spanAssets, spanLengths, lookupNode) {
   const rows = spanAssets.map((span) => {
-    const from = lookupNode(span.a);
-    const to = lookupNode(span.b);
+    // The orientation the span was first drawn in is what the file shows, so a
+    // spreadsheet row reads in the same direction as the cable on the drawing.
+    const fromId = span.fromNodeId ?? span.a;
+    const toId = span.toNodeId ?? span.b;
     const record = spanLengths.get(span.id);
     return {
       spanId: span.id,
-      fromNodeId: span.a,
-      toNodeId: span.b,
-      fromLabel: from?.label ?? '',
-      toLabel: to?.label ?? '',
+      spanDesignation: span.designation ?? '',
+      fromNodeId: fromId,
+      toNodeId: toId,
+      fromDesignation: designationOf(lookupNode(fromId)),
+      toDesignation: designationOf(lookupNode(toId)),
       lengthM: record ? record.lengthM : '',
     };
   });
