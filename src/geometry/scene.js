@@ -153,8 +153,8 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
         text: 'Origin',
         anchor: 'start',
         fontSize: config.labelFontSize,
-        offsetX: config.poleMarkerSize + 5,
-        offsetY: -config.poleMarkerSize - 5,
+        offsetX: config.poleMarkerSize + 8,
+        offsetY: -config.poleMarkerSize - 9,
       });
     }
     if (activeProfile.showAlphaLabels && node.alphaLabel) {
@@ -167,7 +167,7 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
         anchor: 'middle',
         fontSize: config.labelFontSize,
         offsetX: 0,
-        offsetY: -config.poleMarkerSize - 6,
+        offsetY: -config.poleMarkerSize - 9,
       });
     }
   }

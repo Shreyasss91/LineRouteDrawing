@@ -1,0 +1,13 @@
+# Generated verification output (screenshots, downloaded exports).
+# Regenerate with: node scripts/verify-browser.mjs
+artifacts/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

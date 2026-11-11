@@ -1,0 +1,479 @@
+/* Line Route Drawing Generator - application styles.
+   Neutral, print-friendly palette. No icons or emoji are used anywhere. */
+
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --ink: #14181d;
+  --ink-soft: #5a6572;
+  --line: #d7dce3;
+  --line-strong: #b9c1cb;
+  --accent: #1f5fa8;
+  --accent-ink: #ffffff;
+  --danger: #a52b2b;
+  --danger-bg: #fdf1f1;
+  --ok: #1d6b3a;
+  --radius: 8px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 14px rgba(16, 24, 40, 0.05);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- header ---------- */
+
+.app-header {
+  padding: 18px 24px 6px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: 3px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+/* ---------- layout ---------- */
+
+.app-main {
+  display: grid;
+  grid-template-columns: minmax(400px, 1fr) minmax(420px, 1.35fr);
+  grid-template-areas:
+    "routes preview"
+    "routes output";
+  gap: 16px;
+  padding: 14px 24px 28px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .app-main {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "routes"
+      "preview"
+      "output";
+  }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.panel-routes {
+  grid-area: routes;
+}
+
+.panel-preview {
+  grid-area: preview;
+}
+
+.panel-output {
+  grid-area: output;
+}
+
+.panel h2 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+/* ---------- form ---------- */
+
+.route-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.form-actions,
+.form-error {
+  grid-column: 1 / -1;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field > label,
+.field > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.field-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  padding-top: 20px;
+}
+
+.field-check > label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-inline input {
+  width: 68px;
+}
+
+select,
+input[type="number"] {
+  font: inherit;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 6px 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+select:focus,
+input[type="number"]:focus,
+input[type="checkbox"]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.form-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: #f0f3f7;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1a518f;
+}
+
+.btn-quiet {
+  color: var(--ink-soft);
+}
+
+.btn-icon {
+  width: 30px;
+  padding: 4px 0;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.btn-small {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+/* ---------- table ---------- */
+
+.table-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 12px 0 10px;
+}
+
+.table-wrap {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: #f2f4f7;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #eef1f4;
+  vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+tbody tr.is-selected {
+  background: #eaf2fb;
+}
+
+tbody tr.is-invalid {
+  background: var(--danger-bg);
+}
+
+td.cell-index {
+  color: var(--ink-soft);
+  width: 34px;
+}
+
+td.cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.status-ok {
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.status-bad {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.empty-state {
+  margin: 0;
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.error-list {
+  margin-top: 12px;
+  border: 1px solid #e7c6c6;
+  background: var(--danger-bg);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.error-list h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--danger);
+}
+
+.error-list ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.error-list li {
+  margin: 3px 0;
+  font-size: 13px;
+  color: #7d2323;
+}
+
+/* ---------- preview ---------- */
+
+.preview-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.preview-header h2 {
+  margin: 0;
+}
+
+.preview-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preview-stage {
+  position: relative;
+  height: 460px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.preview-stage.is-panning {
+  cursor: grabbing;
+}
+
+.preview-canvas {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+
+.preview-canvas svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.preview-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.preview-empty[hidden] {
+  display: none;
+}
+
+.hint {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+/* ---------- output ---------- */
+
+.output-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.export-status {
+  margin: 10px 0 0;
+  min-height: 18px;
+  font-size: 12px;
+  color: var(--ok);
+}
+
+/* Ink-friendly print of the drawing itself. */
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .app-header,
+  .panel-routes,
+  .preview-header,
+  .hint,
+  .panel-output {
+    display: none;
+  }
+
+  .app-main {
+    display: block;
+    padding: 0;
+  }
+
+  .panel-preview {
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .preview-empty {
+    display: none;
+  }
+}

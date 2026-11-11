@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Line Route Drawing Generator</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="styles/app.css" />
+    <!-- Vendored locally: no CDN, no runtime network access. jsPDF 4.2.1, MIT. -->
+    <script src="vendor/jspdf/jspdf.umd.cjs"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Line Route Drawing Generator</h1>
+      <p class="subtitle">
+        Define sequential routes, review the drawing, then export or print it.
+      </p>
+    </header>
+
+    <main class="app-main">
+      <section class="panel panel-routes" aria-labelledby="routes-heading">
+        <h2 id="routes-heading">Route instructions</h2>
+
+        <form id="route-form" class="route-form" novalidate>
+          <div class="field">
+            <label for="field-from">From</label>
+            <select id="field-from" name="from" required></select>
+          </div>
+          <div class="field">
+            <label for="field-direction">Direction</label>
+            <select id="field-direction" name="direction">
+              <option value="north">North</option>
+              <option value="south">South</option>
+              <option value="east">East</option>
+              <option value="west">West</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="field-spans">Spans</label>
+            <input id="field-spans" name="spans" type="number" min="1" step="1" value="1" />
+          </div>
+          <div class="field field-check">
+            <input id="field-tc" name="tc" type="checkbox" />
+            <label for="field-tc">TC point</label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" id="btn-save-route" class="btn btn-primary">Add route</button>
+            <button type="button" id="btn-cancel-edit" class="btn" hidden>Cancel edit</button>
+          </div>
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+        </form>
+
+        <div class="table-toolbar">
+          <button type="button" id="btn-load-example" class="btn">Load example</button>
+          <button type="button" id="btn-clear" class="btn btn-quiet">Clear all</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">From</th>
+                <th scope="col">Direction</th>
+                <th scope="col">Spans</th>
+                <th scope="col">TC</th>
+                <th scope="col">Status</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="route-rows"></tbody>
+          </table>
+          <p id="empty-state" class="empty-state">No routes yet. Add one above or load the example.</p>
+        </div>
+
+        <div id="error-list" class="error-list" role="alert" hidden></div>
+      </section>
+
+      <section class="panel panel-preview" aria-labelledby="preview-heading">
+        <div class="preview-header">
+          <h2 id="preview-heading">Drawing preview</h2>
+          <div class="preview-controls">
+            <button type="button" id="btn-zoom-out" class="btn btn-icon" title="Zoom out" aria-label="Zoom out">&minus;</button>
+            <button type="button" id="btn-zoom-in" class="btn btn-icon" title="Zoom in" aria-label="Zoom in">+</button>
+            <button type="button" id="btn-fit" class="btn">Fit to screen</button>
+            <button type="button" id="btn-reset" class="btn">Reset view</button>
+            <label class="field field-inline">
+              <span>Span spacing</span>
+              <input id="field-spacing" type="number" min="12" max="120" step="2" value="40" />
+            </label>
+          </div>
+        </div>
+        <div id="preview-stage" class="preview-stage">
+          <div id="preview-canvas" class="preview-canvas"></div>
+          <p id="preview-empty" class="preview-empty">The drawing appears here as routes are added.</p>
+        </div>
+        <p class="hint">Drag to pan, scroll to zoom.</p>
+      </section>
+
+      <section class="panel panel-output" aria-labelledby="output-heading">
+        <h2 id="output-heading">Output</h2>
+        <div class="field">
+          <label for="field-layout">Page layout</label>
+          <select id="field-layout">
+            <option value="a4_landscape">A4 landscape</option>
+            <option value="a4_portrait">A4 portrait</option>
+            <option value="a3_landscape">A3 landscape</option>
+            <option value="letter_landscape">Letter landscape</option>
+          </select>
+        </div>
+        <div class="output-actions">
+          <button type="button" id="btn-pdf" class="btn btn-primary">Download PDF</button>
+          <button type="button" id="btn-svg" class="btn">Download SVG for Office</button>
+          <button type="button" id="btn-print" class="btn">Print drawing</button>
+        </div>
+        <p class="hint">
+          PDF, SVG and print hide the Origin and alphabetical labels. X symbols,
+          route lines and TC triangles are always drawn.
+        </p>
+        <p id="export-status" class="export-status" role="status"></p>
+      </section>
+    </main>
+
+    <script type="module" src="src/ui/app.js"></script>
+  </body>
+</html>
