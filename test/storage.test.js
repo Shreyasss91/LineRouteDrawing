@@ -114,7 +114,19 @@ test('1. saving then loading restores the project exactly', () => {
 
     const loaded = loadFromStorage();
     assert.equal(loaded.status, 'ok');
-    assert.deepEqual(loaded.project, project);
+    // Every authored value comes back; a project that recorded no measurements
+    // also comes back with that measurement state explicit rather than missing.
+    assert.deepEqual(
+      {
+        routes: loaded.project.routes,
+        originMarker: loaded.project.originMarker,
+        spanLength: loaded.project.spanLength,
+        layout: loaded.project.layout,
+      },
+      project,
+    );
+    assert.deepEqual(loaded.project.loads, []);
+    assert.equal(loaded.project.spanLengths.size, 0);
     assert.equal(loaded.savedAt, '2026-05-06T07:08:09.000Z');
   } finally {
     restore();

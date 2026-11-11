@@ -57,7 +57,17 @@ test('1. serialization produces the versioned document', () => {
 
 test('2. the payload carries only what the user authored', () => {
   const payload = toProjectPayload(sampleProject());
-  assert.deepEqual(Object.keys(payload).sort(), ['layout', 'originMarker', 'routes', 'spanLength']);
+  // Schema version 2 adds the measured data alongside the routes and settings.
+  assert.deepEqual(Object.keys(payload).sort(), [
+    'layout',
+    'loadPlacements',
+    'loads',
+    'originMarker',
+    'routes',
+    'spanLength',
+    'spanLengths',
+    'spanPlacements',
+  ]);
   assert.deepEqual(Object.keys(payload.routes[0]).sort(), [
     'direction',
     'fpb',
@@ -81,7 +91,16 @@ test('3. serialization is deterministic', () => {
 
   // Key order is fixed, not incidental.
   const firstKeys = Object.keys(JSON.parse(a).project);
-  assert.deepEqual(firstKeys, ['routes', 'originMarker', 'spanLength', 'layout']);
+  assert.deepEqual(firstKeys, [
+    'routes',
+    'originMarker',
+    'spanLength',
+    'layout',
+    'loads',
+    'spanLengths',
+    'loadPlacements',
+    'spanPlacements',
+  ]);
 });
 
 test('4. deserialization round-trips every field', () => {
@@ -281,7 +300,8 @@ test('15. an unsupported future schema version is refused without touching the p
 });
 
 test('16. the migration point exists and passes a current document through intact', () => {
-  assert.deepEqual(SUPPORTED_SCHEMA_VERSIONS, [1]);
+  // Version 1 is still readable; version 2 is what this build writes.
+  assert.deepEqual(SUPPORTED_SCHEMA_VERSIONS, [1, 2]);
 
   const document = serializeProject(sampleProject(), { now: FIXED_DATE });
   const migrated = migrateDocument(document);

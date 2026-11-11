@@ -14,15 +14,23 @@
 
 import { DIRECTIONS, PAGE_LAYOUTS } from '../config.js';
 import { buildNetwork, normalizeMarkerKind } from '../geometry/network.js';
+import * as assetModule from '../geometry/assets.js';
+import { normalizeUnit } from '../data/schedules.js';
 
 /** Identifies a file as a project for this tool. */
 export const PROJECT_FORMAT = 'line-route-drawing-project';
 
-/** Current schema version written by `serializeProject`. */
-export const PROJECT_SCHEMA_VERSION = 1;
+/**
+ * Current schema version written by `serializeProject`.
+ *
+ * Version 2 adds the measured data: the asset identity registry, the node load
+ * records, the span length measurements and the annotation placements. Version 1
+ * documents still open - see `migrateDocument`.
+ */
+export const PROJECT_SCHEMA_VERSION = 2;
 
 /** Every schema version this build can read. */
-export const SUPPORTED_SCHEMA_VERSIONS = Object.freeze([1]);
+export const SUPPORTED_SCHEMA_VERSIONS = Object.freeze([1, 2]);
 
 /** The only marker kinds a route destination may carry. */
 const VALID_DIRECTIONS = new Set(Object.keys(DIRECTIONS));
@@ -73,6 +81,19 @@ export function sameAuthoredProject(a, b) {
 function authoredSignature(project) {
   if (!project || typeof project !== 'object') return '';
   const routes = Array.isArray(project.routes) ? project.routes : [];
+  const loads = (project.loads ?? [])
+    .map((load) => ({
+      id: String(load.id),
+      nodeId: String(load.nodeId),
+      value: Number(load.value),
+      unit: String(load.unit),
+    }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  // The measurements belong to the project as much as the routes do, so opening a
+  // file that changes them has to count as a change and ask before replacing.
+  const spanLengths = normalizeMeasurementEntries(project.spanLengths);
+
   return JSON.stringify({
     originMarker: project.originMarker,
     spanLength: Number(project.spanLength),
@@ -85,10 +106,34 @@ function authoredSignature(project) {
       tc: Boolean(route.tc),
       fpb: Boolean(route.fpb),
     })),
+    loads,
+    spanLengths,
+    loadPlacements: normalizePlacements(project.loadPlacements),
+    spanPlacements: normalizePlacements(project.spanPlacements),
   });
 }
 
 export function toProjectPayload(project) {
+  const loads = (project.loads ?? []).map((load) => ({
+    id: String(load.id),
+    nodeId: String(load.nodeId),
+    value: Number(load.value),
+    unit: String(load.unit),
+  }));
+
+  // The measurements are a Map in memory and an object in the file, keyed by the
+  // span's asset id, which is what makes "one physical edge, one length" true of
+  // the stored form as well.
+  const spanLengths = {};
+  const entries =
+    project.spanLengths instanceof Map
+      ? [...project.spanLengths.entries()]
+      : Object.entries(project.spanLengths ?? {});
+  for (const [spanId, value] of entries.sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    const lengthM = typeof value === 'object' && value !== null ? value.lengthM : value;
+    if (Number.isFinite(Number(lengthM))) spanLengths[String(spanId)] = Number(lengthM);
+  }
+
   return {
     routes: (project.routes ?? []).map((route) => ({
       id: String(route.id),
@@ -101,7 +146,58 @@ export function toProjectPayload(project) {
     originMarker: normalizeMarkerKind(project.originMarker),
     spanLength: Number(project.spanLength),
     layout: String(project.layout ?? ''),
+    loads,
+    spanLengths,
+    // Placements are keyed by asset id too, so a dragged callout follows its
+    // pole rather than staying at a screen position.
+    loadPlacements: normalizePlacements(project.loadPlacements),
+    spanPlacements: normalizePlacements(project.spanPlacements),
   };
+}
+
+/**
+ * A placement map, with only usable offsets kept.
+ *
+ * An offset is a drag distance in scene pixels, not a position, so it stays
+ * correct if the drawing is re-laid-out. Anything that is not a finite pair is
+ * dropped rather than written as `null`, which would make the file say a callout
+ * had been moved when it had not.
+ *
+ * @param {object|Map<string, {dx: number, dy: number}>} placements Placements.
+ * @returns {object} Plain object of `{id: {dx, dy}}`.
+ */
+function normalizePlacements(placements) {
+  const out = {};
+  const entries =
+    placements instanceof Map ? [...placements.entries()] : Object.entries(placements ?? {});
+  for (const [id, offset] of entries.sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    if (!offset || typeof offset !== 'object') continue;
+    const dx = Number(offset.dx);
+    const dy = Number(offset.dy);
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
+    out[String(id)] = { dx: roundTo(dx, 2), dy: roundTo(dy, 2) };
+  }
+  return out;
+}
+
+/** Measurements as a sorted `[spanId, length]` list, whichever form they arrive in. */
+function normalizeMeasurementEntries(spanLengths) {
+  const entries =
+    spanLengths instanceof Map
+      ? [...spanLengths.entries()]
+      : Object.entries(spanLengths ?? {});
+  return entries
+    .map(([spanId, value]) => {
+      const lengthM = typeof value === 'object' && value !== null ? value.lengthM : value;
+      return [String(spanId), Number(lengthM)];
+    })
+    .filter(([, lengthM]) => Number.isFinite(lengthM))
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
+function roundTo(value, decimals) {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
 }
 
 /**
@@ -328,24 +424,185 @@ export function parseProjectDocument(document) {
     );
   }
 
+  // The measured data. Each section is validated before anything is applied, and
+  // a malformed section refuses the whole file: a project that half-loaded its
+  // survey would be worse than one that did not load at all.
+  const measured = validateMeasuredData(payload, network, problems);
+  if (!measured.ok) {
+    return fail(measured.code, measured.message);
+  }
+
   return ok(
     {
       routes,
       originMarker: payload.originMarker,
       spanLength,
       layout: payload.layout,
+      loads: measured.loads,
+      spanLengths: measured.spanLengths,
+      loadPlacements: measured.loadPlacements,
+      spanPlacements: measured.spanPlacements,
     },
-    { warnings },
+    { warnings: [...warnings, ...measured.warnings] },
   );
+}
+
+/**
+ * Validate the load, length and placement sections of a project payload.
+ *
+ * A record that refers to an asset the drawing no longer has is kept and reported
+ * rather than refused: the user removed that branch deliberately and their load
+ * is still their data, so it stays unresolved until they reassign or discard it.
+ * A record that is simply malformed - a negative kVA, an unknown unit, a repeated
+ * id - is a different matter and refuses the file, because there is no sensible
+ * way to load it.
+ *
+ * @param {object} payload Project payload.
+ * @param {object} network Rebuilt network, used to check asset ids exist.
+ * @param {string[]} problems Ignored; kept so the signature reads consistently.
+ * @returns {{ok: true, ...} | {ok: false, code: string, message: string}}
+ */
+function validateMeasuredData(payload, network, problems) {
+  const warnings = [];
+  const issues = [];
+
+  // ---- loads ----
+  const liveNodes = new Set();
+  if (payload.loads !== undefined && !Array.isArray(payload.loads)) {
+    return { ok: false, code: 'BAD_LOADS', message: 'That project has a load list that is not a list.' };
+  }
+  const loads = [];
+  const seenLoadIds = new Set();
+  for (const [index, load] of (payload.loads ?? []).entries()) {
+    const row = index + 1;
+    if (!load || typeof load !== 'object' || Array.isArray(load)) {
+      issues.push(`Load ${row} is not a load.`);
+      continue;
+    }
+    if (typeof load.id !== 'string' || load.id === '') {
+      issues.push(`Load ${row} has no identifier.`);
+      continue;
+    }
+    if (seenLoadIds.has(load.id)) {
+      issues.push(`Load ${row} reuses the identifier ${load.id}.`);
+      continue;
+    }
+    seenLoadIds.add(load.id);
+    if (typeof load.nodeId !== 'string' || load.nodeId === '') {
+      issues.push(`Load ${row} does not say which point it belongs to.`);
+      continue;
+    }
+    const value = Number(load.value);
+    if (!Number.isFinite(value) || value <= 0) {
+      issues.push(`Load ${row} has a value that is not a number greater than zero.`);
+      continue;
+    }
+    const unit = normalizeUnit(load.unit);
+    if (!unit) {
+      issues.push(`Load ${row} has a unit this tool does not recognise.`);
+      continue;
+    }
+    loads.push({ id: load.id, nodeId: load.nodeId, value, unit });
+  }
+
+  // ---- span lengths ----
+  const spanLengths = new Map();
+  const rawSpans = payload.spanLengths;
+  if (rawSpans !== undefined && (typeof rawSpans !== 'object' || rawSpans === null || Array.isArray(rawSpans))) {
+    return {
+      ok: false,
+      code: 'BAD_SPAN_LENGTHS',
+      message: 'That project has a span length table that is not a table.',
+    };
+  }
+  for (const [spanId, rawValue] of Object.entries(rawSpans ?? {})) {
+    const lengthM = Number(rawValue);
+    if (!Number.isFinite(lengthM) || lengthM <= 0) {
+      issues.push(`The length saved for span ${spanId} is not a number greater than zero.`);
+      continue;
+    }
+    spanLengths.set(String(spanId), { spanId: String(spanId), lengthM });
+  }
+
+  if (issues.length > 0) {
+    return {
+      ok: false,
+      code: 'INVALID_MEASUREMENTS',
+      message: `That project cannot be opened: ${issues.join(' ')}`,
+    };
+  }
+
+  // ---- placements ----
+  const loadPlacements = validatePlacements(payload.loadPlacements, 'load');
+  const spanPlacements = validatePlacements(payload.spanPlacements, 'span');
+  if (!loadPlacements.ok) return loadPlacements;
+  if (!spanPlacements.ok) return spanPlacements;
+
+  // ---- referential checks, reported but not fatal ----
+  const { buildAssetRegistry } = assetModule;
+  const registry = buildAssetRegistry(network);
+  for (const asset of registry.allNodeAssets()) liveNodes.add(asset.id);
+  const liveSpans = new Set(registry.allSpanAssets().map((span) => span.id));
+
+  const orphanLoads = loads.filter((load) => !liveNodes.has(load.nodeId));
+  if (orphanLoads.length > 0) {
+    warnings.push(
+      `${orphanLoads.length} ${
+        orphanLoads.length === 1 ? 'load belongs' : 'loads belong'
+      } to points this drawing no longer has. They are kept and can be reassigned.`,
+    );
+  }
+  const orphanSpans = [...spanLengths.values()].filter((span) => !liveSpans.has(span.spanId));
+  if (orphanSpans.length > 0) {
+    warnings.push(
+      `${orphanSpans.length} ${
+        orphanSpans.length === 1 ? 'length belongs' : 'lengths belong'
+      } to spans this drawing no longer has. They are kept and can be reassigned.`,
+    );
+  }
+
+  return {
+    ok: true,
+    loads,
+    spanLengths,
+    loadPlacements: loadPlacements.placements,
+    spanPlacements: spanPlacements.placements,
+    warnings,
+  };
+}
+
+/** Read a placement map, dropping anything unusable rather than refusing the file. */
+function validatePlacements(raw, kind) {
+  if (raw !== undefined && (typeof raw !== 'object' || raw === null || Array.isArray(raw))) {
+    return {
+      ok: false,
+      code: 'BAD_PLACEMENTS',
+      message: `That project has a ${kind} placement table that is not a table.`,
+    };
+  }
+  const placements = {};
+  for (const [id, offset] of Object.entries(raw ?? {})) {
+    if (!offset || typeof offset !== 'object') continue;
+    const dx = Number(offset.dx);
+    const dy = Number(offset.dy);
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
+    placements[String(id)] = { dx, dy };
+  }
+  return { ok: true, placements };
 }
 
 /**
  * Bring an older document up to the current schema version.
  *
- * There is one version today, so this returns the document unchanged. It exists
- * so a future version has an obvious place to be added, and so every read path
- * already goes through a single migration point rather than growing branches
- * later.
+ * Each step upgrades by exactly one version, so a file from any supported
+ * version arrives at the current one by the same sequence of steps. The routes
+ * and settings are never touched: a migration only ever adds what a later version
+ * knows about and an earlier one did not have.
+ *
+ * The rule that matters: a migration never invents measured data. A version 1
+ * project had no loads and no span lengths, so it comes back with both empty. It
+ * must not guess a length from the drawing's spacing, because the spacing is a
+ * layout choice and the length is a survey - one is not evidence of the other.
  *
  * @param {object} document A parsed document of a supported version.
  * @returns {{project: object, warnings: string[]}} Migrated payload.
@@ -354,10 +611,38 @@ export function migrateDocument(document) {
   const warnings = [];
   let payload = document.project;
 
-  // Each step upgrades by one version. None are defined yet.
-  // if (document.schemaVersion === 1 && PROJECT_SCHEMA_VERSION >= 2) { ... }
+  if (document.schemaVersion === 1 && PROJECT_SCHEMA_VERSION >= 2) {
+    payload = upgradeV1ToV2(payload, warnings);
+  }
 
   return { project: payload, warnings };
+}
+
+/**
+ * Version 1 to 2: introduce the measured data.
+ *
+ * Version 1 held routes and drawing settings only. Version 2 adds the load
+ * records, the span measurements and the annotation placements, all of which
+ * start empty: nothing was measured under version 1, so there is nothing to carry
+ * across, and an empty schedule is the honest representation of that.
+ *
+ * @param {object} payload Version 1 project payload.
+ * @param {string[]} warnings Collected notices.
+ * @returns {object} Version 2 payload.
+ */
+function upgradeV1ToV2(payload, warnings) {
+  if (!payload || typeof payload !== 'object') return payload;
+  warnings.push(
+    'This project was saved before loads and span lengths could be recorded, ' +
+      'so it opens with both empty. Its drawing is unchanged.',
+  );
+  return {
+    ...payload,
+    loads: [],
+    spanLengths: {},
+    loadPlacements: {},
+    spanPlacements: {},
+  };
 }
 
 /* ------------------------------------------------------------------ */

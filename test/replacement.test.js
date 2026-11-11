@@ -162,13 +162,33 @@ test('13. the comparison ignores nothing the schema stores', () => {
   const payloadKeys = Object.keys(
     JSON.parse(serializeProjectJson(withRoutes(), { now: FIXED_DATE })).project,
   );
-  assert.deepEqual(payloadKeys.sort(), ['layout', 'originMarker', 'routes', 'spanLength']);
+  assert.deepEqual(payloadKeys.sort(), [
+    'layout',
+    'loadPlacements',
+    'loads',
+    'originMarker',
+    'routes',
+    'spanLength',
+    'spanLengths',
+    'spanPlacements',
+  ]);
 
+  // Every stored field except the routes (covered by their own case) must make
+  // two projects compare as different, or a file could replace it without asking.
   for (const key of payloadKeys) {
-    const a = withRoutes();
-    const b = withRoutes();
     if (key === 'routes') continue;
-    b[key] = key === 'spanLength' ? a[key] + 1 : `${a[key]}-different`;
+    const a = { ...withRoutes(), loads: [], spanLengths: new Map(), loadPlacements: {}, spanPlacements: {} };
+    const b = JSON.parse(JSON.stringify({ ...a, spanLengths: {} }));
+    const changed = {
+      spanLength: a.spanLength + 1,
+      originMarker: 'tc',
+      layout: 'a3_landscape',
+      loads: [{ id: 'load-1', nodeId: 'origin', value: 5, unit: 'kVA' }],
+      spanLengths: { 'origin~dst:route-1': 30 },
+      loadPlacements: { origin: { dx: 4, dy: 4 } },
+      spanPlacements: { 'origin~dst:route-1': { dx: 2, dy: 2 } },
+    };
+    b[key] = changed[key];
     assert.equal(sameAuthoredProject(a, b), false, `${key} is compared`);
   }
 });

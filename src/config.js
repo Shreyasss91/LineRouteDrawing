@@ -171,6 +171,39 @@ export const DEFAULT_CONFIG = Object.freeze({
   fontFamily: 'Helvetica, Arial, sans-serif',
   /** Font size for origin and alphabetical labels, in px. */
   labelFontSize: 13,
+
+  /* ---- Load and span annotations ---------------------------------- */
+
+  /** Font size for the lines of a load callout, in px. */
+  annotLoadFontSize: 10,
+  /** Font size for a span length label, in px. */
+  annotSpanFontSize: 10,
+  /** Line spacing between the lines of one load callout, in px. */
+  annotLineSpacing: 12,
+  /** Thickness of a leader line, in px. */
+  annotLeaderWidth: 0.9,
+  /** Length of an arrowhead's side, in px. */
+  annotArrowSize: 5,
+  /** Gap between a callout's text block and its leader, in px. */
+  annotCalloutGap: 6,
+  /** Padding around the text inside a callout's box, in px. */
+  annotCalloutPaddingX: 3,
+  /** Vertical padding inside a callout's box, in px. */
+  annotCalloutPaddingY: 2,
+  /**
+   * Distance from a node to the near edge of its callout, before collision
+   * avoidance moves it, in px.
+   */
+  annotOffset: 22,
+  /**
+   * How much clear space a callout, a span label or a leader must leave around
+   * every marker symbol and every other annotation, in px.
+   */
+  annotClearance: 3,
+  /** Gap between a span label and its line, in px. */
+  annotSpanGap: 7,
+  /** Draw a white halo behind annotation text, so a line under it stays legible. */
+  annotHalo: true,
 });
 
 /** The example configuration from the handwritten reference drawing. */
