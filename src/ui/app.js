@@ -41,6 +41,7 @@ const dom = {
   direction: el('field-direction'),
   spans: el('field-spans'),
   tc: el('field-tc'),
+  fpb: el('field-fpb'),
   saveRoute: el('btn-save-route'),
   cancelEdit: el('btn-cancel-edit'),
   formError: el('form-error'),
@@ -145,6 +146,18 @@ function resetView() {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Text for a route's marker column.
+ *
+ * @param {object} route Route instruction.
+ * @returns {string} `TC`, `FPB` or `No`.
+ */
+function markerCellText(route) {
+  if (route.fpb) return 'FPB';
+  if (route.tc) return 'TC';
+  return 'No';
+}
+
+/**
  * Resolve the display text of a route's source, including the case where the
  * reference can no longer be resolved (an earlier row was edited or deleted).
  */
@@ -181,7 +194,7 @@ function renderTable() {
       <td class="cell-from"></td>
       <td>${directionLabel}</td>
       <td>${Number(route.spans)}</td>
-      <td>${route.tc ? 'Yes' : 'No'}</td>
+      <td>${markerCellText(route)}</td>
       <td><span class="${resolved && resolved.ok ? 'status-ok' : 'status-bad'}">${statusText}</span></td>
       <td class="cell-actions">
         <button type="button" class="btn btn-small" data-action="edit">Edit</button>
@@ -300,6 +313,7 @@ function clearForm() {
   state.selectedId = null;
   dom.spans.value = '1';
   dom.tc.checked = false;
+  dom.fpb.checked = false;
   dom.saveRoute.textContent = 'Add route';
   dom.cancelEdit.hidden = true;
   showFormError('');
@@ -315,6 +329,7 @@ function startEdit(routeId) {
   dom.direction.value = route.direction;
   dom.spans.value = String(route.spans);
   dom.tc.checked = Boolean(route.tc);
+  dom.fpb.checked = Boolean(route.fpb);
   dom.saveRoute.textContent = 'Save changes';
   dom.cancelEdit.hidden = false;
   showFormError('');
@@ -346,12 +361,16 @@ function readForm() {
   if (!dom.from.value) {
     return { error: 'Choose the starting point for this route.' };
   }
+  if (dom.tc.checked && dom.fpb.checked) {
+    return { error: 'A destination is either a TC point or a feeder pillar box (FPB), not both.' };
+  }
   return {
     value: {
       from: dom.from.value,
       direction: dom.direction.value,
       spans,
       tc: dom.tc.checked,
+      fpb: dom.fpb.checked,
     },
   };
 }

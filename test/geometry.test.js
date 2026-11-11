@@ -50,28 +50,32 @@ test('2b. a plain graph keeps one node per shared coordinate', () => {
   assert.equal(edgeKey({ x: 1, y: 0 }, { x: 0, y: 0 }), edgeKey({ x: 0, y: 0 }, { x: 1, y: 0 }));
 });
 
-test('3. alphabetical labels are assigned on first reuse as a source', () => {
+test('3. every created endpoint is labelled immediately, in creation order', () => {
   assert.equal(alphaLabel(0), 'A');
   assert.equal(alphaLabel(25), 'Z');
   assert.equal(alphaLabel(26), 'AA');
 
-  // Route 1 creates an endpoint that is never reused -> no label.
+  // A route's destination is named as soon as it exists, so the drawing shows
+  // the new branch straight away rather than waiting for it to be reused.
   const single = buildNetwork(routes([{ from: 'origin', direction: 'north', spans: 2, tc: false }]));
   const terminal = single.endpoints.find((e) => e.kind !== 'origin' && e.kind !== 'tc');
-  assert.equal(terminal.displayName, null, 'unused terminal endpoint displays no letter');
-  assert.equal(nodeAt(single, 0, 2).alphaLabel, null);
+  assert.equal(terminal.displayName, 'A', 'a new endpoint is labelled A immediately');
+  assert.equal(nodeAt(single, 0, 2).alphaLabel, 'A');
 
-  // Reusing an endpoint as a source assigns the next letter, in order.
+  // Labels follow creation order and never move when a node is reused.
   const network = buildNetwork(
     routes([
-      { from: 'origin', direction: 'north', spans: 2, tc: false },
-      { from: 'endpoint:A', direction: 'east', spans: 1, tc: false },
-      { from: 'endpoint:B', direction: 'south', spans: 1, tc: false },
+      { from: 'origin', direction: 'north', spans: 2, tc: false }, // A at (0,2)
+      { from: 'endpoint:A', direction: 'east', spans: 1, tc: false }, // B at (1,2)
+      { from: 'endpoint:B', direction: 'south', spans: 1, tc: false }, // C at (1,1)
     ]),
   );
   assert.equal(nodeAt(network, 0, 2).alphaLabel, 'A');
   assert.equal(nodeAt(network, 1, 2).alphaLabel, 'B');
-  assert.equal(network.alphaCount, 2);
+  assert.equal(nodeAt(network, 1, 1).alphaLabel, 'C');
+  assert.equal(network.alphaCount, 3, 'every ordinary endpoint is labelled');
+  // TC and FPB destinations never consume a letter.
+  assert.equal(network.endpoints.filter((e) => e.kind === 'tc').length, 0);
 });
 
 test('4. TC endpoints are identified by a stable internal id and a triangle marker', () => {
@@ -312,9 +316,13 @@ test('example network: topology matches the reference drawing', () => {
   assert.equal(nodeAt(network, 4, -1).alphaLabel, 'B');
   assert.equal(nodeAt(network, 4, -7).alphaLabel, 'C');
   assert.equal(nodeAt(network, 5, -7).alphaLabel, 'D');
-  // Terminals that are never reused carry no letter.
-  assert.equal(nodeAt(network, 4, -9).alphaLabel, null);
-  assert.equal(nodeAt(network, 5, -17).alphaLabel, null);
+  // Every ordinary endpoint is labelled on creation, so terminal branches show
+  // a letter too; the letters are assigned in creation order.
+  assert.equal(nodeAt(network, 4, -9).alphaLabel, 'E');
+  assert.equal(nodeAt(network, 2, -7).alphaLabel, 'F');
+  assert.equal(nodeAt(network, 12, -7).alphaLabel, 'G');
+  assert.equal(nodeAt(network, 5, -17).alphaLabel, 'H');
+  assert.equal(network.alphaCount, 8, 'A through H');
 });
 
 test('sequential dependency: forward references are refused with an actionable error', () => {

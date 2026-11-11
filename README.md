@@ -26,7 +26,7 @@ Any static file server works equally well. There is nothing to compile.
 ## Using it
 
 1. Choose **From**, **Direction**, **Spans** and whether the destination is a
-   **TC point**, then **Add route**.
+   **TC point** or an **FPB point**, then **Add route**.
 2. Select a row and press **Edit** to change it; **Delete** removes it. Every
    later route is re-evaluated immediately.
 3. **Load example** reproduces the reference drawing described below.
@@ -38,11 +38,18 @@ Any static file server works equally well. There is nothing to compile.
 ### How names appear
 
 - The starting point is **Origin**.
-- Endpoints get the letters **A, B, C, ...** the first time they are used as the
-  starting point of another route. A branch that is never used again shows no
-  letter.
+- Endpoints get the letters **A, B, C, ...** in the order they are created, so a
+  new branch is named in the drawing the moment it is added. A label never moves
+  when an endpoint is reused.
 - A **TC** point is a special point drawn as a triangle. It never takes a
   letter. One TC point is called `TC`; several are `TC1`, `TC2`, and so on.
+- An **FPB** (feeder pillar box) is drawn as a rectangle sized to its own label
+  with `FPB` written inside it. It never takes a letter either. One FPB is called
+  `FPB`; several are `FPB1`, `FPB2`, and so on. A destination cannot be a TC
+  point and an FPB at the same time.
+- Neither a TC point nor an FPB ever gets a crossing marker on top of its own
+  symbol: the triangle or the box takes that place, while every other pole keeps
+  its X.
 
 ### What each output shows
 
@@ -53,6 +60,7 @@ Any static file server works equally well. There is nothing to compile.
 | Route lines | yes | yes | yes | yes |
 | X symbols | yes | yes | yes | yes |
 | TC triangles | yes | yes | yes | yes |
+| FPB boxes with label | yes | yes | yes | yes |
 
 Printing uses exactly the PDF rules. Exports hide text only; the drawing itself
 is never modified, so the preview stays complete.
@@ -61,17 +69,20 @@ is never modified, so the preview stays complete.
 
 The bundled example matches the reference drawing:
 
-| # | From | Direction | Spans | TC |
+| # | From | Direction | Spans | Marker |
 | --- | --- | --- | --- | --- |
 | 1 | Origin | South | 1 | No |
 | 2 | A | East | 4 | No |
-| 3 | B | South | 3 | Yes |
+| 3 | B | South | 3 | TC |
 | 4 | TC | South | 3 | No |
 | 5 | C | East | 1 | No |
 | 6 | C | South | 2 | No |
 | 7 | D | West | 3 | No |
 | 8 | D | East | 7 | No |
 | 9 | D | South | 10 | No |
+
+The `From` field preselects the most recently created endpoint, so a chain of
+routes can be entered without re-selecting the previous destination each time.
 
 The example is stored as data in `src/config.js` and is loaded by the
 **Load example** button; it is not built into the geometry engine.

@@ -155,6 +155,12 @@ body {
   color: var(--ink);
 }
 
+/* The two marker switches sit on one row so they read as alternatives. */
+.field-marker {
+  grid-column: 1 / -1;
+  padding-top: 0;
+}
+
 .field-inline {
   flex-direction: row;
   align-items: center;

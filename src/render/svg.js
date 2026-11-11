@@ -114,6 +114,26 @@ export function renderSceneToSvg(scene, options = {}) {
     parts.push('</g>');
   }
 
+  if (scene.fpb && scene.fpb.length) {
+    // A feeder pillar box is a rectangle sized to its own label, with the text
+    // inside it. The text is part of the symbol, so it survives in exports even
+    // though every ordinary label is suppressed there.
+    parts.push(`<g id="fpb-markers" fill="none" stroke="#111" stroke-width="1.5">`);
+    for (const box of scene.fpb) {
+      parts.push(
+        `<rect id="${escapeXml(box.id)}" x="${num(box.boxX)}" y="${num(box.boxY)}" ` +
+          `width="${num(box.width)}" height="${num(box.height)}" fill="#ffffff"/>`,
+      );
+      parts.push(
+        `<text id="${escapeXml(box.id)}-label" x="${num(box.x)}" ` +
+          `y="${num(box.y)}" fill="#111" stroke="none" font-family="${escapeXml(scene.fontFamily)}" ` +
+          `font-size="${num(box.fontSize)}" text-anchor="middle" ` +
+          `dominant-baseline="central">${escapeXml(box.text)}</text>`,
+      );
+    }
+    parts.push('</g>');
+  }
+
   if (scene.labels.length) {
     // A white halo keeps label text readable where a line passes close by,
     // without hiding the pole marker itself.

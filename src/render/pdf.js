@@ -172,6 +172,25 @@ export function renderSceneToPdf(scene, options) {
     }
   }
 
+  // Feeder pillar boxes: a rectangle with its label inside. The text belongs to
+  // the symbol, so it is drawn even though ordinary labels are suppressed.
+  if (scene.fpb && scene.fpb.length) {
+    doc.setLineWidth(poleWidth);
+    doc.setDrawColor(0, 0, 0);
+    for (const box of scene.fpb) {
+      const x = tx(box.boxX);
+      const y = ty(box.boxY);
+      const w = box.width * fit.scale;
+      const h = box.height * fit.scale;
+      doc.setFillColor(255, 255, 255);
+      doc.rect(x, y, w, h, 'FD');
+      doc.setFont(scene.fontFamily.split(',')[0].trim(), 'normal');
+      doc.setFontSize(Math.max(3, box.fontSize * fit.scale));
+      doc.setTextColor(0, 0, 0);
+      doc.text(box.text, tx(box.x), ty(box.y), { align: 'center', baseline: 'middle' });
+    }
+  }
+
   // Labels only exist for the preview profile; exports carry none.
   if (scene.labels.length) {
     doc.setFont(scene.fontFamily.split(',')[0].trim(), 'normal');
@@ -190,6 +209,7 @@ export function renderSceneToPdf(scene, options) {
       lines: scene.lines.length,
       poles: scene.poles.length,
       tc: scene.tc.length,
+      fpb: (scene.fpb ?? []).length,
       labels: scene.labels.length,
     },
   };

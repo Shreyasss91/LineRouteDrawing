@@ -71,6 +71,22 @@ export function measureDrawing(bbox, config, padding = config.exportPadding) {
   };
 }
 
+/**
+ * Approximate rendered width of a string for a given font size.
+ *
+ * The marker box must fit its text in every renderer, and neither SVG nor PDF
+ * can measure text at build time, so a conservative per-character width is used
+ * for Helvetica/Arial. It is deliberately slightly generous: an over-wide box
+ * looks correct, a tight one clips the label.
+ *
+ * @param {string} text Text to measure.
+ * @param {number} fontSize Font size in px.
+ * @returns {number} Estimated width in px.
+ */
+export function measureFpbText(text, fontSize) {
+  return String(text).length * fontSize * 0.62;
+}
+
 /** Convert a graph node set into a plain array of nodes. */
 function nodeList(graph) {
   return [...graph.nodes.values()];
@@ -98,6 +114,7 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
   const lines = [];
   const poles = [];
   const tc = [];
+  const fpb = [];
   const labels = [];
   const junctions = [];
 
@@ -122,11 +139,12 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
 
   for (const node of nodes) {
     const p = toPixel(node);
-    // A TC point is shown by its triangle only. Drawing the X on top of it
-    // would put two symbols at one coordinate and muddy both, so the triangle
-    // takes the place of the crossing marker there.
+    // A TC point is shown by its triangle only, and a feeder pillar box by its
+    // rectangle only. Drawing an X on top of either would put two symbols at one
+    // coordinate and muddy both, so the marker takes the place of the crossing.
     const isTcAnchor = Boolean(node.tcId) && activeProfile.showTcMarkers;
-    if (activeProfile.showPoleMarkers && !isTcAnchor) {
+    const isFpbAnchor = Boolean(node.fpbId) && activeProfile.showFpbMarkers;
+    if (activeProfile.showPoleMarkers && !isTcAnchor && !isFpbAnchor) {
       poles.push({
         id: `pole:${node.key}`,
         x: p.x,
@@ -146,6 +164,27 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
         halfWidth: config.tcMarkerSize,
         height: config.tcMarkerHeight,
         name: node.tcName,
+      });
+    }
+    if (activeProfile.showFpbMarkers && node.fpbId) {
+      // The box is sized from its own text, so it always fits the label.
+      const text = config.fpbText;
+      const fontSize = config.fpbFontSize;
+      const textWidth = measureFpbText(text, fontSize);
+      const boxWidth = textWidth + config.fpbPaddingX * 2;
+      const boxHeight = fontSize + config.fpbPaddingY * 2;
+      fpb.push({
+        id: `fpb:${node.key}`,
+        x: p.x,
+        y: p.y,
+        width: boxWidth,
+        height: boxHeight,
+        text,
+        name: node.fpbName,
+        fontSize,
+        // Centre the box on the anchor so the line enters and leaves it evenly.
+        boxX: p.x - boxWidth / 2,
+        boxY: p.y - boxHeight / 2,
       });
     }
     if (activeProfile.showOriginLabel && node.isOrigin) {
@@ -181,6 +220,7 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
   lines.sort(byXThenY);
   poles.sort(byXThenY);
   tc.sort(byXThenY);
+  fpb.sort(byXThenY);
   labels.sort((a, b) => a.id.localeCompare(b.id));
 
   return {
@@ -195,6 +235,7 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
     lines,
     poles,
     tc,
+    fpb,
     labels,
     junctions,
     /** True when any visible text exists; exports must be false. */

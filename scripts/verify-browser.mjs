@@ -62,8 +62,9 @@ record(
 );
 record('preview draws 1 TC triangle', svgInfo.tc === 1, `tc=${svgInfo.tc}`);
 record(
-  'preview shows Origin and alphabetical labels',
-  svgInfo.texts.includes('Origin') && ['A', 'B', 'C', 'D'].every((l) => svgInfo.texts.includes(l)),
+  'preview shows Origin and a label for every created endpoint',
+  svgInfo.texts.includes('Origin') &&
+    ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].every((l) => svgInfo.texts.includes(l)),
   `texts=${svgInfo.texts.join(',')}`,
 );
 
@@ -335,7 +336,118 @@ record(
   `after first route=${afterStep1}, after TC route=${afterStep2}`,
 );
 
-// ---- 16. console cleanliness ----------------------------------------
+// ---- 16. a new node is labelled as soon as it is created ------------
+await page.click('#btn-clear');
+await page.selectOption('#field-direction', 'south');
+await page.fill('#field-spans', '2');
+await page.click('#btn-save-route');
+const labelsAfterOne = await page.evaluate(() =>
+  [...document.querySelectorAll('#preview-canvas svg #labels text')].map((t) => t.textContent),
+);
+record(
+  'a newly created node is labelled in the preview immediately',
+  labelsAfterOne.includes('A') && labelsAfterOne.includes('Origin'),
+  labelsAfterOne.join(','),
+);
+
+// ---- 17. FPB point draws a fitted box and no X ----------------------
+await page.uncheck('#field-tc');
+await page.check('#field-fpb');
+await page.selectOption('#field-direction', 'east');
+await page.fill('#field-spans', '3');
+await page.click('#btn-save-route');
+const fpbMarkers = await page.evaluate(() => {
+  const svg = document.querySelector('#preview-canvas svg');
+  const boxes = [...svg.querySelectorAll('#fpb-markers rect')].map((r) => ({
+    x: Number(r.getAttribute('x')) + Number(r.getAttribute('width')) / 2,
+    y: Number(r.getAttribute('y')) + Number(r.getAttribute('height')) / 2,
+    w: Number(r.getAttribute('width')),
+    h: Number(r.getAttribute('height')),
+  }));
+  const texts = [...svg.querySelectorAll('#fpb-markers text')].map((t) => t.textContent);
+  const poles = [...svg.querySelectorAll('#pole-markers path')].map((el) => {
+    const n = el.getAttribute('d').match(/-?\d+(\.\d+)?/g).map(Number);
+    return { x: (n[0] + n[2]) / 2, y: (n[1] + n[3]) / 2 };
+  });
+  return { boxes, texts, poles };
+});
+const fpbBox = fpbMarkers.boxes[0];
+const fpbOverlap = fpbMarkers.poles.filter(
+  (p) => Math.abs(p.x - fpbBox.x) < 1 && Math.abs(p.y - fpbBox.y) < 1,
+).length;
+record(
+  'the FPB point draws a box containing its label',
+  fpbMarkers.boxes.length === 1 && fpbMarkers.texts[0] === 'FPB' && fpbBox.w > 0 && fpbBox.h > 0,
+  JSON.stringify({ boxes: fpbMarkers.boxes.length, text: fpbMarkers.texts[0], w: fpbBox.w, h: fpbBox.h }),
+);
+record('the FPB box has no X drawn over it', fpbOverlap === 0, `overlaps=${fpbOverlap}`);
+record(
+  'the table records the marker kind',
+  (await page.locator('#route-rows tr').nth(1).locator('td').nth(4).textContent()).trim() === 'FPB',
+);
+
+// both markers on one destination is refused
+// The form resets its marker switches after each save, so set both explicitly.
+await page.check('#field-tc');
+await page.check('#field-fpb');
+await page.fill('#field-spans', '1');
+await page.click('#btn-save-route');
+await page.waitForFunction(() => {
+  const box = document.querySelector('#form-error');
+  return box && !box.hidden && box.textContent.trim().length > 0;
+}, null, { timeout: 2000 }).catch(() => {});
+const bothMarkersError = await page.textContent('#form-error');
+record(
+  'a destination cannot be both TC and FPB',
+  /not both/i.test(bothMarkersError ?? ''),
+  (bothMarkersError ?? '').trim(),
+);
+
+// FPB survives into both exports
+const fpbSvgDownload = await Promise.all([page.waitForEvent('download'), page.click('#btn-svg')]).then(([d]) => d);
+const fpbSvgPath = resolve(OUT, 'fpb-check.svg');
+await fpbSvgDownload.saveAs(fpbSvgPath);
+const fpbSvgText = readFileSync(fpbSvgPath, 'utf8');
+record(
+  'SVG export keeps the FPB box and its label',
+  /<g id="fpb-markers"/.test(fpbSvgText) && />FPB</.test(fpbSvgText) && !/>Origin</.test(fpbSvgText),
+);
+
+const fpbPdfDownload = await Promise.all([page.waitForEvent('download'), page.click('#btn-pdf')]).then(([d]) => d);
+const fpbPdfPath = resolve(OUT, 'fpb-check.pdf');
+await fpbPdfDownload.saveAs(fpbPdfPath);
+const { inflateSync } = await import('node:zlib');
+const fpbPdfBuf = readFileSync(fpbPdfPath);
+const fpbPdfText = fpbPdfBuf.toString('latin1');
+let streamAt = 0;
+let rectOps = 0;
+let fpbTextOps = 0;
+while ((streamAt = fpbPdfText.indexOf('stream', streamAt)) !== -1) {
+  const start = streamAt + 6;
+  const stop = fpbPdfText.indexOf('endstream', start);
+  if (stop < 0) break;
+  let raw = fpbPdfBuf.subarray(start, stop);
+  while (raw.length && (raw[0] === 10 || raw[0] === 13)) raw = raw.subarray(1);
+  try {
+    const decoded = inflateSync(raw).toString('latin1');
+    rectOps += (decoded.match(/\sre[\s\n]/g) ?? []).length;
+    fpbTextOps += (decoded.match(/\(FPB\) Tj/g) ?? []).length;
+  } catch {
+    /* an uncompressed stream does not inflate; ignore it */
+  }
+  streamAt = stop;
+}
+record(
+  'PDF export draws the FPB as a vector rectangle with its label',
+  rectOps > 0 && fpbTextOps > 0 && !/\/Subtype\s*\/Image/.test(fpbPdfText),
+  `rectOps=${rectOps}, fpbTextOps=${fpbTextOps}`,
+);
+
+// leave the app in the example state for the remaining checks
+await page.click('#btn-load-example');
+await page.waitForTimeout(150);
+
+// ---- 18. console cleanliness ----------------------------------------
 record('no console or page errors', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 await page.screenshot({ path: resolve(OUT, 'preview.png'), fullPage: true });

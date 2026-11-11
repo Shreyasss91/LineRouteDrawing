@@ -36,6 +36,7 @@ export const RENDER_PROFILES = Object.freeze({
     showPoleMarkers: true,
     showLines: true,
     showTcMarkers: true,
+    showFpbMarkers: true,
     showJunctionMarkers: false,
   }),
   pdf: Object.freeze({
@@ -45,6 +46,7 @@ export const RENDER_PROFILES = Object.freeze({
     showPoleMarkers: true,
     showLines: true,
     showTcMarkers: true,
+    showFpbMarkers: true,
     showJunctionMarkers: false,
   }),
   svg: Object.freeze({
@@ -54,6 +56,7 @@ export const RENDER_PROFILES = Object.freeze({
     showPoleMarkers: true,
     showLines: true,
     showTcMarkers: true,
+    showFpbMarkers: true,
     showJunctionMarkers: false,
   }),
   print: Object.freeze({
@@ -63,8 +66,22 @@ export const RENDER_PROFILES = Object.freeze({
     showPoleMarkers: true,
     showLines: true,
     showTcMarkers: true,
+    showFpbMarkers: true,
     showJunctionMarkers: false,
   }),
+});
+
+/**
+ * Marker kinds a route destination can carry.
+ *
+ * `plain` is an ordinary endpoint drawn as an X crossing. `tc` is a test point
+ * drawn as a triangle. `fpb` is a feeder pillar box drawn as a rectangle with
+ * its label inside, so it never also receives an X.
+ */
+export const MARKER_KINDS = Object.freeze({
+  plain: 'plain',
+  tc: 'tc',
+  fpb: 'fpb',
 });
 
 /** Page layouts offered for PDF export and printing. */
@@ -115,6 +132,14 @@ export const DEFAULT_CONFIG = Object.freeze({
   tcMarkerSize: 6,
   /** Height of the TC triangle in px. */
   tcMarkerHeight: 10,
+  /** Font size used for the FPB label inside its box, in px. */
+  fpbFontSize: 11,
+  /** Horizontal padding inside the FPB box, in px. */
+  fpbPaddingX: 4,
+  /** Vertical padding inside the FPB box, in px. */
+  fpbPaddingY: 2.5,
+  /** Text drawn inside an FPB marker. */
+  fpbText: 'FPB',
   /** Padding added around the network bounding box for exports, in px. */
   exportPadding: 28,
   /** Padding inside the browser viewport, in px. */

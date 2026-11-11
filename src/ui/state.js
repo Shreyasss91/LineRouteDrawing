@@ -17,9 +17,9 @@ import { buildNetwork } from '../geometry/network.js';
 let routeCounter = 0;
 
 /** Create a fresh instruction with a stable internal id. */
-export function createRoute({ from = '', direction = 'north', spans = 1, tc = false } = {}) {
+export function createRoute({ from = '', direction = 'north', spans = 1, tc = false, fpb = false } = {}) {
   routeCounter += 1;
-  return { id: `route-${routeCounter}`, from, direction, spans, tc };
+  return { id: `route-${routeCounter}`, from, direction, spans, tc, fpb };
 }
 
 /** Next internal route id, kept unique even across load-example calls. */
@@ -79,10 +79,8 @@ export function availableSources(routes, index) {
 /** Human-readable dropdown label for an endpoint. */
 export function endpointLabel(endpoint) {
   if (endpoint.kind === 'origin') return 'Origin';
-  if (endpoint.kind === 'tc') {
-    // TC points are named TC when unique, TC1/TC2 when several exist.
-    return endpoint.displayName ?? endpoint.name;
-  }
+  // TC points are named TC when unique and TC1/TC2 when several exist; feeder
+  // pillar boxes follow the same rule with FPB. Both come from displayName.
   return endpoint.displayName ?? endpoint.name;
 }
 

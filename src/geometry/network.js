@@ -38,6 +38,7 @@ export const ERROR_CODES = Object.freeze({
   INVALID_SPANS: 'invalid-spans',
   ZERO_LENGTH: 'zero-length',
   DEPENDENCY_FAILED: 'dependency-failed',
+  INVALID_MARKER: 'invalid-marker',
 });
 
 /**
@@ -63,6 +64,7 @@ function createEndpointRegistry() {
   const byName = new Map();
   let alphaCounter = 0;
   let tcCounter = 0;
+  let fpbCounter = 0;
 
   function add(endpoint) {
     byId.set(endpoint.id, endpoint);
@@ -114,11 +116,24 @@ function createEndpointRegistry() {
         usedAsSource: false,
       });
     },
+    addFpb(position) {
+      fpbCounter += 1;
+      return add({
+        id: `fpb:${fpbCounter}`,
+        name: `FPB${fpbCounter}`,
+        kind: 'fpb',
+        position: { ...position },
+        usedAsSource: false,
+      });
+    },
     get alphaCount() {
       return alphaCounter;
     },
     get tcCount() {
       return tcCounter;
+    },
+    get fpbCount() {
+      return fpbCounter;
     },
     all() {
       return [...byId.values()];
@@ -162,6 +177,12 @@ function validateShapes(route) {
   }
   if (spans <= 0) {
     return { code: ERROR_CODES.INVALID_SPANS, message: 'Spans must be greater than zero.' };
+  }
+  if (route.tc && route.fpb) {
+    return {
+      code: ERROR_CODES.INVALID_MARKER,
+      message: 'A destination is either a TC point or a feeder pillar box (FPB), not both.',
+    };
   }
   return null;
 }
@@ -259,9 +280,16 @@ export function buildNetwork(routes, options = {}) {
     // already carries an endpoint reuses it instead of creating a second one.
     let destination = registry.all().find((e) => sameCoord(e.position, destinationPosition)) ?? null;
     if (!destination) {
-      destination = route.tc
-        ? registry.addTc(destinationPosition)
-        : registry.addLabeled(destinationPosition, 'endpoint');
+      if (route.fpb) {
+        destination = registry.addFpb(destinationPosition);
+      } else if (route.tc) {
+        destination = registry.addTc(destinationPosition);
+      } else {
+        destination = registry.addLabeled(destinationPosition, 'endpoint');
+      }
+    } else if (route.fpb && destination.kind !== 'fpb') {
+      // The same coordinate requested as a feeder pillar box becomes one.
+      destination.kind = 'fpb';
     } else if (route.tc && destination.kind !== 'tc') {
       // The same coordinate requested as a TC point upgrades it to a TC, keeping
       // its alphabetical letter for later reuse.
@@ -269,8 +297,8 @@ export function buildNetwork(routes, options = {}) {
       destination.tcRequested = true;
     }
 
-    // Only the route's SOURCE becomes reused. The freshly created destination
-    // stays unlabelled until some later route starts from it.
+    // Only the route's SOURCE becomes reused. A destination is labelled when it
+    // is created (see the projection below), not only when it is later reused.
     source.usedAsSource = true;
 
     resolved.push({
@@ -295,6 +323,15 @@ export function buildNetwork(routes, options = {}) {
       endpoint.tcId = endpoint.tcId ?? `tc:${tcNameCounter}`;
     }
   }
+  const fpbEndpoints = registry.all().filter((e) => e.kind === 'fpb');
+  let fpbNameCounter = 0;
+  for (const endpoint of fpbEndpoints) {
+    if (!endpoint.fpbId) {
+      fpbNameCounter += 1;
+      endpoint.fpbId = endpoint.fpbId ?? `fpb:${fpbNameCounter}`;
+    }
+  }
+
   const endpoints = registry.all().map((endpoint) => {
     const node = ensureNode(graph, endpoint.position);
     let displayName;
@@ -302,18 +339,23 @@ export function buildNetwork(routes, options = {}) {
     if (endpoint.kind === 'origin') {
       displayName = 'Origin';
       node.isOrigin = true;
+    } else if (endpoint.kind === 'fpb') {
+      // A feeder pillar box is identified by its box, not by a letter.
+      displayName = fpbEndpoints.length > 1 ? endpoint.name : 'FPB';
+      node.fpbId = endpoint.id;
+      node.fpbName = displayName;
+      endpoint.displayName = displayName;
     } else if (endpoint.kind === 'tc') {
       displayName = tcEndpoints.length > 1 ? endpoint.name : 'TC';
       node.tcId = endpoint.id;
       node.tcName = displayName;
       endpoint.displayName = displayName;
     } else {
-      // Only a reused endpoint displays an alphabetical label.
-      const reused = resolved.some((r) => r.ok && r.sourceId === endpoint.id);
-      alphaLabelValue = reused ? endpoint.name : null;
+      // Every ordinary endpoint is labelled as soon as it is created, so a new
+      // branch is named in the drawing immediately. Reuse does not change the
+      // label; it is assigned in creation order and never moves.
+      alphaLabelValue = endpoint.name;
       node.alphaLabel = alphaLabelValue;
-      // An unused terminal endpoint displays no alphabetical label at all, so
-      // its display name is intentionally null (its id remains stable).
       displayName = alphaLabelValue;
       endpoint.displayName = displayName;
     }
@@ -329,6 +371,7 @@ export function buildNetwork(routes, options = {}) {
     errors,
     endpoints,
     tcCount: tcEndpoints.length,
+    fpbCount: fpbEndpoints.length,
     /** Number of alphabetical labels actually displayed (reused sources). */
     alphaCount: endpoints.filter((e) => e.kind === 'endpoint' && e.displayName).length,
     originPosition: { ...originPosition },
