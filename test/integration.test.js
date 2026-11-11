@@ -7,7 +7,7 @@ import { buildScene } from '../src/geometry/scene.js';
 import { renderSceneToSvg } from '../src/render/svg.js';
 import { renderSceneToPdf } from '../src/render/pdf.js';
 import { resolveExampleRoutes } from '../src/ui/example.js';
-import { availableSources, sourcesForRow, endpointLabel } from '../src/ui/state.js';
+import { availableSources, sourcesForRow, endpointLabel, latestSource } from '../src/ui/state.js';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -90,18 +90,21 @@ test('several TC points are distinguished as TC1, TC2, TC3 and keep their triang
   }
 });
 
-test('a TC point reused as a source keeps both its X and its triangle', () => {
+test('a TC anchor shows the triangle only, never a second X on top of it', () => {
   const network = buildNetwork([
     { id: 'r1', from: 'origin', direction: 'south', spans: 2, tc: true },
     { id: 'r2', from: 'tc:1', direction: 'east', spans: 2, tc: false },
   ]);
   assert.ok(network.ok);
-  for (const profile of ['svg', 'pdf', 'print']) {
+  for (const profile of ['preview', 'svg', 'pdf', 'print']) {
     const scene = buildScene(network, profile);
     assert.equal(scene.tc.length, 1, `${profile} keeps the TC triangle`);
-    const tcPole = scene.poles.find((p) => Math.abs(p.x - scene.tc[0].x) < 0.001 && Math.abs(p.y - scene.tc[0].y) < 0.001);
-    assert.ok(tcPole, `${profile} keeps the X at the shared anchor`);
-    assert.equal(scene.labels.length, 0);
+    const overlapping = scene.poles.filter(
+      (p) => Math.abs(p.x - scene.tc[0].x) < 0.001 && Math.abs(p.y - scene.tc[0].y) < 0.001,
+    );
+    assert.equal(overlapping.length, 0, `${profile} draws no X at the TC anchor`);
+    // The rest of the drawing keeps its crossings.
+    assert.ok(scene.poles.length >= 1, `${profile} keeps X symbols on ordinary poles`);
   }
 });
 
@@ -142,4 +145,49 @@ test('the example SVG and PDF are produced from identical geometry', () => {
   const text = new TextDecoder('latin1').decode(new Uint8Array(doc.output('arraybuffer')));
   assert.doesNotMatch(text, /Origin/);
   assert.doesNotMatch(text, /\/Subtype\s*\/Image/);
+});
+
+test('a new route preselects the most recently created endpoint', () => {
+  // Nothing yet: the Origin is the only starting point.
+  assert.deepEqual(latestSource([]), { id: 'origin', label: 'Origin' });
+
+  // After one route, its destination is preselected. That destination has not
+  // been reused, so it carries no letter yet; the id is what matters.
+  const first = [{ id: 'r1', from: 'origin', direction: 'south', spans: 1, tc: false }];
+  const afterFirst = latestSource(first);
+  assert.equal(afterFirst.id, 'endpoint:A');
+
+  // It is offered by the dropdown for the next row, so the preselection is
+  // actually selectable rather than merely computed.
+  assert.ok(availableSources(first, 1).some((option) => option.id === afterFirst.id));
+
+  // A TC destination is preselected as the TC point, by its own identifier.
+  const withTc = [
+    { id: 'r1', from: 'origin', direction: 'south', spans: 1, tc: false },
+    { id: 'r2', from: 'endpoint:A', direction: 'east', spans: 2, tc: true },
+  ];
+  const afterTc = latestSource(withTc);
+  assert.equal(afterTc.id, 'tc:1');
+  assert.equal(afterTc.label, 'TC');
+  assert.ok(availableSources(withTc, 2).some((option) => option.id === 'tc:1'));
+
+  // The example leaves D's last destination as the newest endpoint.
+  const example = exampleInstructions();
+  const afterExample = latestSource(example);
+  assert.equal(afterExample.id, 'endpoint:H');
+  assert.equal(afterExample.label, 'H');
+});
+
+test('a new route step by step follows the newest endpoint', () => {
+  const routes = [];
+  const push = (route) => routes.push({ id: `r${routes.length + 1}`, ...route });
+  push({ from: latestSource(routes).id, direction: 'south', spans: 1, tc: false });
+  const afterOne = latestSource(routes).id;
+  push({ from: afterOne, direction: 'east', spans: 3, tc: false });
+  const afterTwo = latestSource(routes).id;
+  assert.notEqual(afterOne, afterTwo, 'the preselection advances as routes are added');
+
+  // Every route built this way resolves, which is the point of the default.
+  const network = buildNetwork(routes);
+  assert.equal(network.ok, true, network.errors.map((e) => e.message).join('; '));
 });

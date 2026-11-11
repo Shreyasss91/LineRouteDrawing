@@ -122,7 +122,11 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
 
   for (const node of nodes) {
     const p = toPixel(node);
-    if (activeProfile.showPoleMarkers) {
+    // A TC point is shown by its triangle only. Drawing the X on top of it
+    // would put two symbols at one coordinate and muddy both, so the triangle
+    // takes the place of the crossing marker there.
+    const isTcAnchor = Boolean(node.tcId) && activeProfile.showTcMarkers;
+    if (activeProfile.showPoleMarkers && !isTcAnchor) {
       poles.push({
         id: `pole:${node.key}`,
         x: p.x,

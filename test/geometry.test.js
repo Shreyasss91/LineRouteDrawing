@@ -92,8 +92,10 @@ test('4. TC endpoints are identified by a stable internal id and a triangle mark
 
   const scene = buildScene(network, 'preview');
   assert.equal(scene.tc.length, 2);
-  // The TC node itself still carries an X plus the triangle.
-  assert.ok(scene.poles.some((p) => p.id === 'pole:0,-1'));
+  // A TC point is marked by its triangle alone: no X is stacked on top of it,
+  // so the two symbols never print over each other.
+  assert.equal(scene.poles.filter((p) => p.id === 'pole:0,-1').length, 0);
+  assert.ok(scene.poles.some((p) => p.id === 'pole:0,0'), 'ordinary poles still get an X');
 });
 
 test('4b. a single TC point displays "TC"; several display TC1..TCn', () => {

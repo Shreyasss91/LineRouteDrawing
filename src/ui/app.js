@@ -16,6 +16,7 @@ import { renderSceneToPdf } from '../render/pdf.js';
 import {
   createRoute,
   createState,
+  latestSource,
   sourcesForRow,
   endpointLabel,
 } from './state.js';
@@ -236,8 +237,9 @@ function refreshFromOptions() {
 
   const options = sourcesForRow(state.routes, index, currentFrom);
   // While editing a row, the row's own source is the value that must survive
-  // the rebuild; otherwise keep whatever the user just picked.
-  const previous = currentRoute ? currentRoute.from : dom.from.value;
+  // the rebuild. When adding a new route, the most recently created endpoint
+  // is preselected, which is the common case: continue from where you stopped.
+  const previous = currentRoute ? currentRoute.from : latestSource(state.routes).id;
 
   dom.from.innerHTML = '';
   if (options.length === 0) {

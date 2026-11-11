@@ -55,7 +55,11 @@ const svgInfo = await page.evaluate(() => {
   };
 });
 record('preview draws 33 merged route lines', svgInfo.lines === 33, `lines=${svgInfo.lines}`);
-record('preview draws 34 X pole markers', svgInfo.poles === 34, `poles=${svgInfo.poles}`);
+record(
+  'preview draws one X per pole, excluding the TC anchor',
+  svgInfo.poles === 33,
+  `poles=${svgInfo.poles} (34 nodes, one TC point marked by its triangle)`,
+);
 record('preview draws 1 TC triangle', svgInfo.tc === 1, `tc=${svgInfo.tc}`);
 record(
   'preview shows Origin and alphabetical labels',
@@ -166,7 +170,7 @@ const svgChecks = {
 };
 record('SVG export is vector primitives', svgChecks.vector && svgChecks.noImage);
 record('SVG export hides Origin and alphabetical labels', svgChecks.noLabels);
-record('SVG export keeps X and TC symbols', svgChecks.poleCount === 34 && svgChecks.tcCount === 1, JSON.stringify({ poles: svgChecks.poleCount, tc: svgChecks.tcCount }));
+record('SVG export keeps X and TC symbols', svgChecks.poleCount === 33 && svgChecks.tcCount === 1, JSON.stringify({ poles: svgChecks.poleCount, tc: svgChecks.tcCount }));
 
 // ---- 8. PDF export ---------------------------------------------------
 const pdfDownload = await Promise.all([
@@ -249,7 +253,7 @@ const topologySame = await page.evaluate(() => {
   const svg = document.querySelector('#preview-canvas svg');
   return { lines: svg.querySelectorAll('#route-lines line').length, poles: svg.querySelectorAll('#pole-markers path').length };
 });
-record('span spacing does not change topology', topologySame.lines === 33 && topologySame.poles === 34, JSON.stringify(topologySame));
+record('span spacing does not change topology', topologySame.lines === 33 && topologySame.poles === 33, JSON.stringify(topologySame));
 
 // ---- 12. TC point is selectable by its TC identifier -----------------
 await page.click('#btn-load-example');
@@ -280,7 +284,58 @@ record(
 const blocked = await page.evaluate(() => document.querySelector('#btn-pdf').disabled);
 record('export is blocked while dependents are invalid', blocked);
 
-// ---- 14. console cleanliness ----------------------------------------
+// ---- 14. the TC point shows a triangle only, with no X stacked on it ----
+await page.click('#btn-load-example');
+await page.waitForTimeout(150);
+const markerOverlap = await page.evaluate(() => {
+  const svg = document.querySelector('#preview-canvas svg');
+  const triangles = [...svg.querySelectorAll('#tc-markers polygon')].map((el) => {
+    const [x, y] = el.getAttribute('points').trim().split(/\s+/)[0].split(',').map(Number);
+    return { x, y };
+  });
+  const poleCentres = [...svg.querySelectorAll('#pole-markers path')].map((el) => {
+    const n = el.getAttribute('d').match(/-?\d+(\.\d+)?/g).map(Number);
+    return { x: (n[0] + n[2]) / 2, y: (n[1] + n[3]) / 2 };
+  });
+  const overlaps = triangles.filter((t) =>
+    poleCentres.some((p) => Math.abs(p.x - t.x) < 1 && Math.abs(p.y - t.y) < 1),
+  );
+  return { triangles: triangles.length, poles: poleCentres.length, overlaps: overlaps.length };
+});
+record(
+  'the TC triangle is not drawn over by a second X symbol',
+  markerOverlap.triangles === 1 && markerOverlap.overlaps === 0,
+  JSON.stringify(markerOverlap),
+);
+
+// ---- 15. the From field preselects the most recently created endpoint ----
+const preselected = await page.evaluate(() => {
+  const select = document.querySelector('#field-from');
+  return { id: select.value, label: select.selectedOptions[0]?.textContent ?? '' };
+});
+record(
+  'From is preselecting the latest created endpoint after loading the example',
+  preselected.id === 'endpoint:H' && preselected.label === 'H',
+  JSON.stringify(preselected),
+);
+
+await page.click('#btn-clear');
+await page.selectOption('#field-direction', 'south');
+await page.fill('#field-spans', '1');
+await page.click('#btn-save-route');
+const afterStep1 = await page.evaluate(() => document.querySelector('#field-from').selectedOptions[0]?.textContent);
+await page.selectOption('#field-direction', 'east');
+await page.fill('#field-spans', '2');
+await page.check('#field-tc');
+await page.click('#btn-save-route');
+const afterStep2 = await page.evaluate(() => document.querySelector('#field-from').selectedOptions[0]?.textContent);
+record(
+  'From advances to the newest endpoint as routes are added',
+  afterStep1 === 'A' && afterStep2 === 'TC',
+  `after first route=${afterStep1}, after TC route=${afterStep2}`,
+);
+
+// ---- 16. console cleanliness ----------------------------------------
 record('no console or page errors', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 await page.screenshot({ path: resolve(OUT, 'preview.png'), fullPage: true });

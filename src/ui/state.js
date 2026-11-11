@@ -87,6 +87,28 @@ export function endpointLabel(endpoint) {
 }
 
 /**
+ * The internal id of the endpoint most recently created by the instruction
+ * list, which is what a new route should start from by default.
+ *
+ * "Most recently created" means the destination of the last instruction that
+ * resolved successfully. When nothing has been added yet, the Origin is the
+ * only sensible starting point.
+ *
+ * @param {Array<object>} routes Route list.
+ * @returns {{id: string, label: string}} Source to preselect.
+ */
+export function latestSource(routes) {
+  if (!routes || routes.length === 0) return { id: 'origin', label: 'Origin' };
+  const network = buildNetwork(routes);
+  const lastResolved = [...network.routes].reverse().find((route) => route.ok);
+  const endpoint = lastResolved
+    ? network.endpoints.find((e) => e.id === lastResolved.destinationId)
+    : null;
+  if (!endpoint) return { id: 'origin', label: 'Origin' };
+  return { id: endpoint.id, label: endpointLabel(endpoint) };
+}
+
+/**
  * The source list shown when the route at `index` already references an
  * endpoint. The route being edited keeps its own source even if editing other
  * fields, so the current value must remain selectable.
