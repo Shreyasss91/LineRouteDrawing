@@ -1118,6 +1118,66 @@ const EDITING_TAGS = new Set(['INPUT', 'SELECT', 'BUTTON', 'TEXTAREA', 'LABEL'])
 function setupPreviewInteraction() {
   // A click on a pole or a span selects it in the Network Data tables, which is
   // how a person points at what they mean instead of hunting for an id in a list.
+  // A callout or a span label can be dragged to a clearer spot. The nudge is
+  // stored as an offset from the automatic position, keyed by asset id, so it
+  // survives a redraw and a reload, and a later edit that moves the pole carries
+  // the annotation with it rather than leaving it stranded.
+  let drag = null;
+
+  dom.canvas.addEventListener('pointerdown', (event) => {
+    const group = event.target.closest?.('[data-annot-id]');
+    if (!group) return;
+    const kind = group.getAttribute('data-annot-kind');
+    const assetId = group.getAttribute('data-annot-id');
+    if (!kind || !assetId) return;
+
+    event.stopPropagation();
+    event.preventDefault();
+    const start = { x: event.clientX, y: event.clientY };
+    const existing =
+      kind === 'load' ? state.loadPlacements[assetId] : state.spanPlacements[assetId];
+    drag = {
+      kind,
+      assetId,
+      start,
+      base: { dx: existing?.dx ?? 0, dy: existing?.dy ?? 0 },
+      moved: false,
+    };
+    dom.canvas.style.cursor = 'grabbing';
+    dom.canvas.setPointerCapture?.(event.pointerId);
+  });
+
+  dom.canvas.addEventListener('pointermove', (event) => {
+    if (!drag) return;
+    const scale = view.zoom || 1;
+    const dx = drag.base.dx + (event.clientX - drag.start.x) / scale;
+    const dy = drag.base.dy + (event.clientY - drag.start.y) / scale;
+    if (Math.abs(dx - drag.base.dx) > 0.5 || Math.abs(dy - drag.base.dy) > 0.5) drag.moved = true;
+    const target = drag.kind === 'load' ? 'loadPlacements' : 'spanPlacements';
+    // Live feedback while dragging, without persisting on every pointer move.
+    state[target] = { ...state[target], [drag.assetId]: { dx, dy } };
+    recompute();
+    renderPreview();
+  });
+
+  const endDrag = () => {
+    if (!drag) return;
+    const moved = drag.moved;
+    dom.canvas.style.cursor = '';
+    drag = null;
+    if (moved) {
+      // Only a real movement is written, so a plain click that starts on an
+      // annotation does not record a zero offset as if it had been dragged.
+      persistProject();
+      recompute();
+      renderPreview();
+      networkPanel?.render();
+      notify('Annotation moved. It stays there, even after a reload.');
+    }
+  };
+  dom.canvas.addEventListener('pointerup', endDrag);
+  dom.canvas.addEventListener('pointercancel', endDrag);
+
   dom.canvas.addEventListener('click', (event) => {
     const node = event.target.getAttribute?.('data-node-hit');
     const span = event.target.getAttribute?.('data-span-hit');

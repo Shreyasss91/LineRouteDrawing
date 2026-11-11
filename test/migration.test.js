@@ -217,3 +217,24 @@ test('16. placements with an unusable offset are dropped, not fatal', () => {
   assert.equal(parsed.ok, true, 'the file still opens');
   assert.deepEqual(parsed.project.loadPlacements, {}, 'the bad placement is simply gone');
 });
+
+test('17. a dragged placement survives save and load', () => {
+  // Dragging a callout is a decision the user made about their drawing, so it is
+  // part of the project rather than a screen state that a reload forgets.
+  const project = v2Project();
+  project.loadPlacements = { 'dst:route-1': { dx: 104.5, dy: 52.25 } };
+  const json = serializeProjectJson(project, { now: FIXED_DATE });
+  const parsed = parseProjectJson(json);
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.project.loadPlacements, { 'dst:route-1': { dx: 104.5, dy: 52.25 } });
+});
+
+test('18. a placement offset does not move the drawing itself', () => {
+  // The offset belongs to the annotation, not to the pole. Nothing in the geometry
+  // reads it, which is what this asserts by keeping the routes identical.
+  const moved = v2Project();
+  moved.loadPlacements = { 'dst:route-1': { dx: 300, dy: -200 } };
+  const payload = toProjectPayload(moved);
+  assert.deepEqual(payload.routes, toProjectPayload(v2Project()).routes);
+  assert.equal(payload.spanLength, 40, 'the drawing spacing is untouched');
+});

@@ -172,8 +172,11 @@ export function renderSceneToSvg(scene, options = {}) {
           `stroke="#ffffff" stroke-width="3" stroke-linejoin="round">`,
       );
       for (const span of annots.spans) {
+        // The id and kind are what make the label draggable: the interface reads
+        // them to know which record a pointer move belongs to.
         parts.push(
           `<text id="${escapeXml(span.id)}" data-span="${escapeXml(span.assetId)}" ` +
+            `data-annot-kind="span" data-annot-id="${escapeXml(span.assetId)}" ` +
             `x="${num(span.center.x)}" y="${num(span.center.y)}" ` +
             `text-anchor="middle" dominant-baseline="central" fill="#111">` +
             `${escapeXml(span.lines.join(' '))}</text>`,
@@ -190,7 +193,24 @@ export function renderSceneToSvg(scene, options = {}) {
       for (const callout of annots.callouts) {
         const leader = callout.leader;
         const arrow = callout.arrow;
-        parts.push(`<g id="${escapeXml(callout.id)}" data-node="${escapeXml(callout.assetId)}">`);
+        parts.push(
+          `<g id="${escapeXml(callout.id)}" data-node="${escapeXml(callout.assetId)}" ` +
+            `data-annot-kind="load" data-annot-id="${escapeXml(callout.assetId)}">`,
+        );
+        // An invisible plate the size of the text block. Text alone is only
+        // grabbable where a glyph happens to be, which makes dragging feel broken;
+        // the plate gives the whole callout a reliable handle.
+        const plateWidth = Math.max(
+          ...callout.lines.map((text) => text.length * callout.fontSize * 0.6),
+        );
+        const plateHeight =
+          (callout.lines.length - 1) * scene.config.annotLineSpacing + callout.fontSize;
+        parts.push(
+          `<rect class="callout-plate" x="${num(callout.center.x - plateWidth / 2)}" ` +
+            `y="${num(callout.center.y - plateHeight / 2)}" ` +
+            `width="${num(plateWidth)}" height="${num(plateHeight)}" ` +
+            `fill="transparent" stroke="none"/>`,
+        );
         // The leader stops at the text block's edge, so it touches the callout
         // instead of running underneath it.
         parts.push(

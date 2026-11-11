@@ -36,7 +36,57 @@ Any static file server works equally well. There is nothing to compile.
 4. Use the preview controls to zoom, pan, fit the drawing to the screen or
    reset the view. **Span spacing** changes the length of every span at once and
    never changes the topology.
-5. **Download PDF**, **Download SVG for Office**, or **Print drawing**.
+5. Record what the drawing carries in **Network data** (see below).
+6. **Download PDF**, **Download SVG for Office**, or **Print drawing**.
+
+### Recording loads and span lengths
+
+**Network data** holds two schedules. Neither of them changes the drawing's shape:
+a load sits on a pole that is already there, and a span length is a measurement of
+a cable that is already drawn.
+
+- **Node loads** - one row per electrical load. Choose a **Point**, a **Value** and a
+  **Unit** (kVA, kW, kVAr or HP), then **Add load**. A pole or feeder pillar can carry
+  several loads; they are drawn as a single callout with one line each and a leader
+  arrow that points at the pole. They are never converted or added together, because
+  a kVA and an HP are not addable, and a tool that quietly sums them produces a
+  number that is wrong in a way nobody checks.
+- **Span lengths** - one row per physical span, in metres. Type a length, or enter a
+  **Default length** and press **Apply to unmeasured spans**, which fills only the
+  blanks and never overwrites a length you typed. An unmeasured span draws no label
+  at all; it is not treated as zero and is not guessed from the drawing's spacing.
+  The spacing is a layout choice, the length is a survey, and they are stored apart
+  so changing one cannot move the other.
+
+Both schedules can be moved to and from a spreadsheet. **Copy as spreadsheet** puts
+the table on the clipboard as a tab-separated block with its header row, ready to
+paste into Excel. **Export CSV** writes the same data as a file. **Import CSV or
+paste** accepts either and shows you what would change *before* anything is: how
+many records would be added, updated and removed, and any rows that refer to
+something the drawing no longer has. You then choose between **Replace the
+schedule** (the file is the whole truth) and **Update matching IDs** (the file is a
+change list). A file with a bad line is refused whole, with that line named.
+
+Pointing at the drawing selects the matching row, and pointing at a row highlights
+the drawing, so "which pole" is answered by clicking it. Every point in the
+dropdown reads `C (dst:route-6)`, showing both the label you recognise and the id
+the record is stored against.
+
+A callout or a span length label can be dragged to a clearer spot. The nudge is
+remembered, survives a reload, and follows its pole if the drawing is re-laid-out,
+because it is stored as an offset keyed by the asset's id rather than as a screen
+position. Dragging moves the annotation, never the load: the record stays on its
+pole.
+
+### When the drawing changes
+
+Adding a branch leaves every recorded load and length exactly where it was. Deleting
+one does not: the records that were attached to the removed poles become
+**unresolved**. They are kept, not discarded and not moved onto some other pole,
+and a bar tells you how many. **Review** jumps to the first one; a load can be
+**Reassigned** to a point that still exists, keeping its id and value; **Discard
+them** removes them after a confirmation. Nothing you recorded disappears without
+you seeing it happen.
 
 ### Keeping a project
 
@@ -110,9 +160,18 @@ resumes and the next reload restores whatever you decided on.
 | X symbols | yes | yes | yes | yes |
 | TC triangles | yes | yes | yes | yes |
 | FPB boxes with label | yes | yes | yes | yes |
+| Load callouts with leader and arrow | yes | yes | yes | yes |
+| Span length labels | yes | yes | yes | yes |
 
-Printing uses exactly the PDF rules. Exports hide text only; the drawing itself
-is never modified, so the preview stays complete.
+Printing uses exactly the PDF rules. Exports hide the *drawing's own* text - the
+Origin name and the alphabetical labels - and keep everything that is a fact about
+the installation: the FPB label, the load callouts and the span lengths. The
+drawing itself is never modified, so the preview stays complete.
+
+All three outputs are rendered from one annotated scene, so a callout points at the
+same pole and reads the same numbers on screen, in the PDF and in the SVG. The PDF
+stays fully vector: leaders are stroked lines, arrowheads filled triangles and every
+annotation a real text run.
 
 ### Example configuration
 
@@ -150,6 +209,14 @@ The example is stored as data in `src/config.js` and is loaded by the
 - Shared endpoints, partially or fully overlapping routes, and routes that meet
   at the same point are merged into one drawing. A point is drawn once, with a
   single X symbol, however many routes pass through it.
+- **A load is never converted or summed.** kVA, kW, kVAr and HP are recorded as
+  typed, one record each, and drawn one line each. There is no unit conversion and no
+  total.
+- **A span length never moves the drawing.** Changing a measured length changes a
+  label, not a coordinate. No length is ever derived from the drawing's spacing.
+- **Recorded data is never lost silently.** A record whose pole or span was removed
+  is kept as unresolved and reported, not discarded and never moved onto a different
+  physical point.
 - **Span spacing has a minimum, 39 px by default.** Below it the symbols stop
   fitting between the points they mark: an FPB box is wider than the gap, so it
   swallows the neighbouring pole and can erase a whole span, and the shortest
@@ -199,6 +266,14 @@ complete overlap, intersections, multiple branches, label visibility per
 profile, TC retention in every profile, the full example topology, sequential
 dependency errors, and deterministic recalculation after an edit.
 
+The measured data has its own coverage: stable asset identity across edits and
+removals, one span id per physical edge however many routes walk it, load records
+that stay separate and keep their units, span lengths that never touch the spacing,
+CSV and TSV round trips including the awkward cases (a quoted comma, an apostrophe,
+CRLF, a repeated id, an unknown asset), the version 1 to version 2 migration,
+annotation placement and its collision avoidance, and reconciliation after a
+topology change.
+
 The browser workflow (preview, editing, all three outputs) is checked with
 `scripts/verify-browser.mjs`, which needs Playwright available at run time. It
 is a development aid and is not part of the application.
@@ -218,8 +293,13 @@ only browser and Node built-ins.
   editable drawing, but import behaviour was not verified inside Office itself.
   Office may convert imported graphics into a group of shapes, which is normal
   for SVG import and is not claimed to be shape-by-route editable.
-- Labels are suppressed entirely in exports rather than moved off-canvas, so an
-  exported drawing carries no text at all.
+- The drawing's own labels are suppressed entirely in exports rather than moved
+  off-canvas. Load callouts and span lengths are content, not labels, and are kept.
+- A load cannot be attached to a TC point; the model refuses it rather than drawing
+  a number next to a symbol that has nowhere to put a load.
+- Moving a load to a different point, or resolving an unresolved record, is done from
+  the schedule rather than by dragging. Dragging a callout or a span label nudges the
+  annotation, not the load: the record stays on its pole.
 - The remembered project lives in one browser on one computer. Clearing the
   browser's site data removes it, which is why **Save project** exists.
 - If the remembered project cannot be read, this build cannot repair it. It keeps
