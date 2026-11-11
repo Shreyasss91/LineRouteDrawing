@@ -358,6 +358,41 @@ export function createNetworkPanel(options) {
     renderUnresolved();
   }
 
+  /**
+   * Move an orphaned load onto a point that still exists.
+   *
+   * The record keeps its id and value, so a load that was on a deleted branch
+   * lands on the surviving pole the user chooses rather than being re-entered.
+   */
+  function reassignLoadNode(load) {
+    const nodes = nodeAssets().filter((a) => isLoadEligible(a.nodeType));
+    if (nodes.length === 0) {
+      notify('There are no poles to move this load to. Add a route first.');
+      return;
+    }
+    const list = nodes.map((n, i) => `${i + 1}. ${n.label ?? n.id} (${n.id})`).join('\n');
+    const answer = window.prompt(
+      `Move the load ${load.value} ${load.unit} from ${load.nodeId} to which point?` +
+        '\n\n' +
+        list +
+        '\n\nEnter a number:',
+    );
+    if (answer === null) return;
+    const index = Number(answer) - 1;
+    const target = nodes[index];
+    if (!target) {
+      notify('That is not one of the points listed. The load has not been moved.');
+      return;
+    }
+    const result = reassignLoad(state().loads, load.id, target.id);
+    if (!result.ok) {
+      notify(result.message);
+      return;
+    }
+    onChange({ loads: result.loads });
+    notify(`Load moved to ${target.label ?? target.id}.`);
+  }
+
   /** The completeness line at the top. */
   function renderSummary() {
     const s = state();
@@ -481,6 +516,20 @@ export function createNetworkPanel(options) {
       row.appendChild(unitCell);
 
       const actionCell = document.createElement('td');
+      // A record whose point has gone can be moved to a point that still exists,
+      // without losing its id or its value. Discarding is a separate decision.
+      if (orphan) {
+        const reassignBtn = document.createElement('button');
+        reassignBtn.type = 'button';
+        reassignBtn.className = 'btn btn-small';
+        reassignBtn.textContent = 'Reassign';
+        reassignBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          reassignLoadNode(load);
+        });
+        actionCell.appendChild(reassignBtn);
+      }
+
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.className = 'btn btn-small';
@@ -640,9 +689,13 @@ export function createNetworkPanel(options) {
     const parts = [];
     if (orphanLoads.length) parts.push(`${orphanLoads.length} ${loadWord}`);
     if (orphanSpans.length) parts.push(`${orphanSpans.length} span ${spanWord}`);
+    const plural = total !== 1;
     dom.unresolvedText.textContent =
-      `${parts.join(' and ')} refer to points or spans this drawing no longer has. ` +
-      'They are kept until you reassign or discard them, so nothing you recorded has been lost.';
+      `${parts.join(' and ')} ${plural ? 'refer' : 'refers'} to points or spans this drawing ` +
+      `no longer has. ${plural ? 'They are' : 'It is'} kept until you reassign or discard ` +
+      `${
+        plural ? 'them' : 'it'
+      }, so nothing you recorded has been lost.`;
   }
 
   /* ---------------------------------------------------------------- */

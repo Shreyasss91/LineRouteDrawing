@@ -308,17 +308,48 @@ export function buildAssetRegistry(network) {
  * An orphan is never "recovered" by looking for something at the same coordinate,
  * because that something is a different physical asset.
  *
- * @param {{nodeIds: Iterable<string>, spanIds: Iterable<string>}} live Live asset ids.
+ * The first argument is normally the registry `buildAssetRegistry` returned. It is
+ * also accepted as `{nodeIds, spanIds}` where both are plain collections of asset
+ * ids, because the registry's own `nodeIds` is keyed by coordinate - passing a
+ * registry and passing a set of ids must not quietly give different answers, so the
+ * registry's asset list is what is actually read.
+ *
+ * @param {object} live A registry from `buildAssetRegistry`, or
+ *   `{nodeIds: Iterable<string>, spanIds: Iterable<string>}` of asset ids.
  * @param {Array<{nodeId?: string}>} loads Load records.
  * @param {Array<{spanId: string}>} spans Span length records.
  * @returns {{unresolvedLoads: Array<object>, unresolvedSpans: Array<object>}}
  */
 export function reconcile(live, loads, spans) {
-  const liveNodes = live.nodeIds instanceof Set ? live.nodeIds : new Set(live.nodeIds);
-  const liveSpans = live.spanIds instanceof Set ? live.spanIds : new Set(live.spanIds);
+  const liveNodes = liveNodeIdSet(live);
+  const liveSpans = liveSpanIdSet(live);
 
   return {
     unresolvedLoads: (loads ?? []).filter((load) => !liveNodes.has(load.nodeId)),
     unresolvedSpans: (spans ?? []).filter((span) => !liveSpans.has(span.spanId)),
   };
+}
+
+/**
+ * Every live asset id from a registry, or from a plain id collection.
+ *
+ * A registry is recognised by its own functions rather than by shape, because its
+ * `nodeIds` property is a coordinate-keyed Map and treating that as the id set
+ * would silently mark every record unresolved.
+ */
+function liveNodeIdSet(live) {
+  if (live && typeof live.allNodeAssets === 'function') {
+    return new Set(live.allNodeAssets().map((asset) => asset.id));
+  }
+  const ids = live?.nodeIds ?? [];
+  return ids instanceof Set ? ids : new Set(ids);
+}
+
+/** Every live span asset id, from a registry or from a plain id collection. */
+function liveSpanIdSet(live) {
+  if (live && typeof live.allSpanAssets === 'function') {
+    return new Set(live.allSpanAssets().map((span) => span.id));
+  }
+  const ids = live?.spanIds ?? [];
+  return ids instanceof Set ? ids : new Set(ids);
 }
