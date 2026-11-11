@@ -87,13 +87,15 @@ function createEndpointRegistry() {
       const aliased = byName.get(lowered);
       return aliased ? byId.get(aliased) : null;
     },
-    addOrigin(position) {
+    addOrigin(position, markerKind = 'plain') {
       return add({
         id: ORIGIN_ID,
         name: 'Origin',
         kind: 'origin',
         position: { ...position },
         usedAsSource: true,
+        // The Origin may itself be shown as a TC point or a feeder pillar box.
+        originMarker: markerKind,
       });
     },
     addLabeled(position, kind) {
@@ -141,6 +143,19 @@ function createEndpointRegistry() {
   };
 
   return registry;
+}
+
+/**
+ * Normalize a marker kind to `plain`, `tc` or `fpb`.
+ *
+ * @param {unknown} value Raw marker kind.
+ * @returns {'plain'|'tc'|'fpb'} A valid marker kind; `plain` when unrecognized.
+ */
+export function normalizeMarkerKind(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (text === 'tc') return 'tc';
+  if (text === 'fpb') return 'fpb';
+  return 'plain';
 }
 
 /**
@@ -205,11 +220,14 @@ function validateShapes(route) {
  */
 export function buildNetwork(routes, options = {}) {
   const originPosition = options.origin ?? { x: 0, y: 0 };
+  // The Origin is a pole by default but the user may declare it a TC point or a
+  // feeder pillar box, in which case it is drawn with that symbol instead of an X.
+  const originMarker = normalizeMarkerKind(options.originMarker);
   const graph = createGraph();
   const registry = createEndpointRegistry();
   const errors = [];
 
-  const origin = registry.addOrigin(originPosition);
+  const origin = registry.addOrigin(originPosition, originMarker);
   const originNode = ensureNode(graph, originPosition);
   originNode.isOrigin = true;
 
@@ -339,6 +357,14 @@ export function buildNetwork(routes, options = {}) {
     if (endpoint.kind === 'origin') {
       displayName = 'Origin';
       node.isOrigin = true;
+      // The Origin's own symbol follows its declared marker kind.
+      if (endpoint.originMarker === 'tc') {
+        node.tcId = endpoint.id;
+        node.tcName = 'TC';
+      } else if (endpoint.originMarker === 'fpb') {
+        node.fpbId = endpoint.id;
+        node.fpbName = 'FPB';
+      }
     } else if (endpoint.kind === 'fpb') {
       // A feeder pillar box is identified by its box, not by a letter.
       displayName = fpbEndpoints.length > 1 ? endpoint.name : 'FPB';
@@ -375,6 +401,7 @@ export function buildNetwork(routes, options = {}) {
     /** Number of alphabetical labels actually displayed (reused sources). */
     alphaCount: endpoints.filter((e) => e.kind === 'endpoint' && e.displayName).length,
     originPosition: { ...originPosition },
+    originMarker,
     boundingBox,
   };
 }

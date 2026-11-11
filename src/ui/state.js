@@ -14,6 +14,8 @@
 
 import { buildNetwork } from '../geometry/network.js';
 
+export { normalizeMarkerKind } from '../geometry/network.js';
+
 let routeCounter = 0;
 
 /** Create a fresh instruction with a stable internal id. */
@@ -39,6 +41,8 @@ export function createState(exampleRoutes = []) {
       }),
     ),
     selectedId: null,
+    /** How the Origin itself is drawn: plain pole, TC point or FPB box. */
+    originMarker: 'plain',
     spanLength: 40,
     layout: 'a4_landscape',
   };

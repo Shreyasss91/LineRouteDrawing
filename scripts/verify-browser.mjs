@@ -447,7 +447,63 @@ record(
 await page.click('#btn-load-example');
 await page.waitForTimeout(150);
 
-// ---- 18. console cleanliness ----------------------------------------
+// ---- 18. the Origin's own marker is selectable ----------------------
+await page.click('#btn-load-example');
+await page.waitForTimeout(150);
+const readMarkers = () =>
+  page.evaluate(() => {
+    const svg = document.querySelector('#preview-canvas svg');
+    return {
+      poles: svg.querySelectorAll('#pole-markers path').length,
+      tc: svg.querySelectorAll('#tc-markers polygon').length,
+      fpb: svg.querySelectorAll('#fpb-markers rect').length,
+    };
+  });
+
+const originPlain = await readMarkers();
+record(
+  'the Origin is a pole by default',
+  originPlain.poles === 33 && originPlain.tc === 1 && originPlain.fpb === 0,
+  JSON.stringify(originPlain),
+);
+
+await page.selectOption('#field-origin-marker', 'tc');
+await page.waitForTimeout(200);
+const originTc = await readMarkers();
+record(
+  'the Origin can be a TC point, losing its X and gaining a triangle',
+  originTc.poles === 32 && originTc.tc === 2 && originTc.fpb === 0,
+  JSON.stringify(originTc),
+);
+
+await page.selectOption('#field-origin-marker', 'fpb');
+await page.waitForTimeout(200);
+const originFpb = await readMarkers();
+record(
+  'the Origin can be an FPB point, losing its X and gaining a box',
+  originFpb.poles === 32 && originFpb.tc === 1 && originFpb.fpb === 1,
+  JSON.stringify(originFpb),
+);
+
+const originSvg = await Promise.all([page.waitForEvent('download'), page.click('#btn-svg')]).then(([d]) => d);
+const originSvgPath = resolve(OUT, 'origin-fpb-check.svg');
+await originSvg.saveAs(originSvgPath);
+const originSvgText = readFileSync(originSvgPath, 'utf8');
+record(
+  'an FPB Origin survives into the SVG export',
+  /<g id="fpb-markers"/.test(originSvgText) && />FPB</.test(originSvgText) && !/>Origin</.test(originSvgText),
+);
+
+await page.selectOption('#field-origin-marker', 'plain');
+await page.waitForTimeout(150);
+const originBack = await readMarkers();
+record(
+  'switching the Origin back to a pole restores its X',
+  originBack.poles === 33 && originBack.fpb === 0,
+  JSON.stringify(originBack),
+);
+
+// ---- 19. console cleanliness ----------------------------------------
 record('no console or page errors', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 await page.screenshot({ path: resolve(OUT, 'preview.png'), fullPage: true });

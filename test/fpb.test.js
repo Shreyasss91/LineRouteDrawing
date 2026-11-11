@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
-import { buildNetwork } from '../src/geometry/network.js';
+import { buildNetwork, normalizeMarkerKind } from '../src/geometry/network.js';
 import { buildScene, measureFpbText } from '../src/geometry/scene.js';
 import { renderSceneToSvg } from '../src/render/svg.js';
 import { renderSceneToPdf } from '../src/render/pdf.js';
@@ -147,4 +147,91 @@ test('a route ending on an FPB coordinate reuses that FPB, not a second node', (
   assert.equal(scene.fpb.length, 1, 'one FPB box');
   const box = scene.fpb[0];
   assert.equal(scene.poles.filter((p) => Math.abs(p.x - box.x) < 0.001 && Math.abs(p.y - box.y) < 0.001).length, 0);
+});
+
+test('the Origin defaults to a pole when no marker kind is given', () => {
+  const network = buildNetwork([
+    { id: 'r1', from: 'origin', direction: 'east', spans: 2, tc: false },
+  ]);
+  assert.equal(network.originMarker, 'plain');
+  const scene = buildScene(network, 'preview');
+  assert.equal(scene.poles.filter((p) => p.id === 'pole:0,0').length, 1, 'the Origin has an X');
+  assert.equal(scene.tc.length, 0);
+  assert.equal(scene.fpb.length, 0);
+});
+
+test('the Origin can be declared a TC point and then draws a triangle, not an X', () => {
+  const network = buildNetwork(
+    [{ id: 'r1', from: 'origin', direction: 'east', spans: 2, tc: false }],
+    { originMarker: 'tc' },
+  );
+  assert.equal(network.originMarker, 'tc');
+  // tcCount counts TC destinations created by routes; the Origin's own marker
+  // is reported separately by originMarker.
+  assert.equal(network.tcCount, 0);
+  for (const profile of ['preview', 'svg', 'pdf', 'print']) {
+    const scene = buildScene(network, profile);
+    assert.equal(scene.tc.length, 1, `${profile} draws the Origin triangle`);
+    assert.equal(
+      scene.poles.filter((p) => p.id === 'pole:0,0').length,
+      0,
+      `${profile} draws no X at a TC Origin`,
+    );
+    assert.ok(scene.poles.length >= 1, `${profile} keeps X on ordinary poles`);
+  }
+  // The Origin is still identifiable as the Origin in the preview.
+  assert.ok(buildScene(network, 'preview').labels.some((l) => l.text === 'Origin'));
+});
+
+test('the Origin can be declared an FPB and then draws a box, not an X', () => {
+  const network = buildNetwork(
+    [{ id: 'r1', from: 'origin', direction: 'south', spans: 3, tc: false }],
+    { originMarker: 'fpb' },
+  );
+  assert.equal(network.originMarker, 'fpb');
+  assert.equal(network.fpbCount, 0);
+  for (const profile of ['preview', 'svg', 'pdf', 'print']) {
+    const scene = buildScene(network, profile);
+    assert.equal(scene.fpb.length, 1, `${profile} draws the Origin box`);
+    assert.equal(scene.fpb[0].text, 'FPB');
+    assert.equal(
+      scene.poles.filter((p) => p.id === 'pole:0,0').length,
+      0,
+      `${profile} draws no X at an FPB Origin`,
+    );
+  }
+});
+
+test('an FPB Origin survives into the SVG and PDF exports', () => {
+  const network = buildNetwork(
+    [{ id: 'r1', from: 'origin', direction: 'east', spans: 2, tc: false }],
+    { originMarker: 'fpb' },
+  );
+  const svg = renderSceneToSvg(buildScene(network, 'svg'), { standalone: false });
+  assert.match(svg, /<g id="fpb-markers"/);
+  assert.match(svg, />FPB</);
+
+  const { doc, primitives } = renderSceneToPdf(buildScene(network, 'pdf'), {
+    jsPDF,
+    layout: 'a4_landscape',
+    compress: false,
+  });
+  assert.equal(primitives.fpb, 1);
+  const text = new TextDecoder('latin1').decode(new Uint8Array(doc.output('arraybuffer')));
+  assert.match(text, /\sre[\s\n]/);
+  assert.match(text, /\(FPB\) Tj/);
+  assert.doesNotMatch(text, /Origin/);
+});
+
+test('an unknown origin marker kind falls back to a pole', () => {
+  assert.equal(normalizeMarkerKind('pole'), 'plain');
+  assert.equal(normalizeMarkerKind(''), 'plain');
+  assert.equal(normalizeMarkerKind(undefined), 'plain');
+  assert.equal(normalizeMarkerKind('TC'), 'tc');
+  assert.equal(normalizeMarkerKind('fpb'), 'fpb');
+  const network = buildNetwork(
+    [{ id: 'r1', from: 'origin', direction: 'east', spans: 1, tc: false }],
+    { originMarker: 'nonsense' },
+  );
+  assert.equal(network.originMarker, 'plain');
 });

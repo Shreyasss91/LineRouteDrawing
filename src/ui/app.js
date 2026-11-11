@@ -42,6 +42,7 @@ const dom = {
   spans: el('field-spans'),
   tc: el('field-tc'),
   fpb: el('field-fpb'),
+  originMarker: el('field-origin-marker'),
   saveRoute: el('btn-save-route'),
   cancelEdit: el('btn-cancel-edit'),
   formError: el('form-error'),
@@ -77,7 +78,7 @@ let current = { network: buildNetwork([]), scene: null };
 
 /** Rebuild the canonical network and the preview scene from the routes. */
 function recompute() {
-  const network = buildNetwork(state.routes);
+  const network = buildNetwork(state.routes, { originMarker: state.originMarker });
   const scene = buildScene(network, 'preview', { spanLength: state.spanLength });
   current = { network, scene };
   return current;
@@ -593,6 +594,11 @@ function setupEventListeners() {
     refresh({ refit: true });
   });
 
+  dom.originMarker.addEventListener('change', () => {
+    state.originMarker = dom.originMarker.value;
+    refresh({ refit: false });
+  });
+
   dom.layout.addEventListener('change', () => {
     state.layout = dom.layout.value;
     updateOutputButtons();
@@ -614,6 +620,7 @@ function boot() {
   setupPreviewInteraction();
   dom.spacing.value = String(state.spanLength);
   dom.layout.value = state.layout;
+  dom.originMarker.value = state.originMarker;
   refresh();
   // Start from the example so the tool is immediately useful.
   loadExample();

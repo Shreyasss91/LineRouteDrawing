@@ -25,6 +25,9 @@ Any static file server works equally well. There is nothing to compile.
 
 ## Using it
 
+0. Set **The starting point is a** to choose how the Origin itself is drawn:
+   **Pole** (default), **TC point** or **FPB point**. This is a property of the
+   drawing, not of a route, so it applies to every output at once.
 1. Choose **From**, **Direction**, **Spans** and whether the destination is a
    **TC point** or an **FPB point**, then **Add route**.
 2. Select a row and press **Edit** to change it; **Delete** removes it. Every
@@ -37,7 +40,8 @@ Any static file server works equally well. There is nothing to compile.
 
 ### How names appear
 
-- The starting point is **Origin**.
+- The starting point is **Origin**. It is drawn as a pole (an X) unless you set
+  it to be a TC point or an FPB, in which case it shows that symbol and no X.
 - Endpoints get the letters **A, B, C, ...** in the order they are created, so a
   new branch is named in the drawing the moment it is added. A label never moves
   when an endpoint is reused.

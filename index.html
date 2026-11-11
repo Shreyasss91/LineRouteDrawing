@@ -21,6 +21,15 @@
       <section class="panel panel-routes" aria-labelledby="routes-heading">
         <h2 id="routes-heading">Route instructions</h2>
 
+        <div class="origin-setting">
+          <label for="field-origin-marker">The starting point is a</label>
+          <select id="field-origin-marker">
+            <option value="plain">Pole</option>
+            <option value="tc">TC point</option>
+            <option value="fpb">FPB point</option>
+          </select>
+        </div>
+
         <form id="route-form" class="route-form" novalidate>
           <div class="field">
             <label for="field-from">From</label>
