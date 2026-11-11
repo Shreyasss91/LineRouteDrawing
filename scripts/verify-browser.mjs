@@ -638,7 +638,61 @@ record(
   JSON.stringify(originBack),
 );
 
-// ---- 19. console cleanliness ----------------------------------------
+// ---- 19. tight spacing is refused, not silently broken ---------------
+await page.click('#btn-load-example');
+await page.waitForTimeout(150);
+
+const requiredSpacing = await page.getAttribute('#field-spacing', 'min');
+await page.fill('#field-spacing', '20');
+await page.locator('#field-spacing').dispatchEvent('change');
+await page.waitForTimeout(250);
+
+const tightState = await page.evaluate(() => {
+  const warning = document.querySelector('#spacing-warning');
+  const buttons = ['#btn-pdf', '#btn-svg', '#btn-print'].map((s) => document.querySelector(s));
+  return {
+    warningShown: !warning.hidden,
+    warningText: warning.textContent.trim(),
+    required: warning.getAttribute('data-required'),
+    spacingValue: document.querySelector('#field-spacing').value,
+    exportsDisabled: buttons.every((b) => b.disabled),
+    // The preview must still draw the user's chosen spacing, not a corrected one.
+    stillDrawn: document.querySelectorAll('#preview-canvas svg #route-lines line').length > 0,
+  };
+});
+record(
+  'a spacing too tight for the symbols is refused with an actionable message',
+  tightState.warningShown &&
+    tightState.warningText.includes(`${tightState.required} px`) &&
+    tightState.exportsDisabled,
+  JSON.stringify(tightState),
+);
+record(
+  'the chosen spacing is preserved rather than silently corrected',
+  tightState.spacingValue === '20',
+  `field still reads ${tightState.spacingValue}`,
+);
+record(
+  'the refused drawing is still previewed, so the problem is visible',
+  tightState.stillDrawn === true,
+);
+
+await page.fill('#field-spacing', requiredSpacing);
+await page.locator('#field-spacing').dispatchEvent('change');
+await page.waitForTimeout(250);
+const restoredState = await page.evaluate(() => ({
+  warningHidden: document.querySelector('#spacing-warning').hidden,
+  exportsEnabled: ['#btn-pdf', '#btn-svg', '#btn-print'].every(
+    (s) => !document.querySelector(s).disabled,
+  ),
+}));
+record(
+  'the minimum workable spacing is accepted and re-enables exporting',
+  restoredState.warningHidden && restoredState.exportsEnabled,
+  JSON.stringify(restoredState),
+);
+
+// ---- 20. console cleanliness ----------------------------------------
 record('no console or page errors', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 await page.screenshot({ path: resolve(OUT, 'preview.png'), fullPage: true });

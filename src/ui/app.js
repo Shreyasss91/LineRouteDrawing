@@ -11,6 +11,7 @@
 import { EXAMPLE_ROUTES, createConfig, PAGE_LAYOUTS } from '../config.js';
 import { buildNetwork } from '../geometry/network.js';
 import { buildScene } from '../geometry/scene.js';
+import { checkSpanClearance, requiredSpanLength } from '../geometry/clearance.js';
 import { renderSceneToSvg } from '../render/svg.js';
 import { renderSceneToPdf } from '../render/pdf.js';
 import {
@@ -29,6 +30,8 @@ function nextRouteIdValue() {
   return createRoute({}).id;
 }
 const MIN_SPACING = 12;
+/** Smallest spacing at which the marker symbols keep their clearance. */
+const REQUIRED_SPACING = requiredSpanLength();
 const MAX_SPACING = 120;
 const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 6;
@@ -43,6 +46,7 @@ const dom = {
   tc: el('field-tc'),
   fpb: el('field-fpb'),
   originMarker: el('field-origin-marker'),
+  spacingWarning: el('spacing-warning'),
   saveRoute: el('btn-save-route'),
   cancelEdit: el('btn-cancel-edit'),
   formError: el('form-error'),
@@ -86,7 +90,17 @@ function recompute() {
 
 /** True when the current route list is valid and therefore exportable. */
 function isExportable() {
-  return current.network.ok && state.routes.length > 0;
+  return current.network.ok && state.routes.length > 0 && spacingVerdict().ok;
+}
+
+/**
+ * Whether the chosen spacing leaves room for the marker symbols.
+ *
+ * A spacing this tight would overlap the symbols and trim the route lines away,
+ * so the drawing is refused rather than silently produced wrong.
+ */
+function spacingVerdict() {
+  return checkSpanClearance(state.spanLength);
 }
 
 /* ------------------------------------------------------------------ */
@@ -289,10 +303,37 @@ function refresh({ refit = false } = {}) {
 
 function updateOutputButtons() {
   const ok = isExportable();
+  const spacing = spacingVerdict();
   for (const button of [dom.pdf, dom.svg, dom.print]) {
     button.disabled = !ok;
-    button.title = ok ? '' : 'Fix the route errors before exporting.';
+    if (ok) {
+      button.title = '';
+    } else if (!spacing.ok) {
+      button.title = spacing.message;
+    } else {
+      button.title = 'Fix the route errors before exporting.';
+    }
   }
+  showSpacingWarning(spacing);
+}
+
+/**
+ * Show the spacing problem next to the drawing, or clear it.
+ *
+ * The user's chosen spacing is never changed for them: the message says what is
+ * wrong and which value will work, and the preview keeps showing their choice.
+ */
+function showSpacingWarning(spacing) {
+  if (!dom.spacingWarning) return;
+  if (spacing.ok) {
+    dom.spacingWarning.hidden = true;
+    dom.spacingWarning.textContent = '';
+    dom.spacingWarning.removeAttribute('data-required');
+    return;
+  }
+  dom.spacingWarning.hidden = false;
+  dom.spacingWarning.textContent = spacing.message;
+  dom.spacingWarning.setAttribute('data-required', String(spacing.required));
 }
 
 /* ------------------------------------------------------------------ */
@@ -619,6 +660,7 @@ function boot() {
   setupEventListeners();
   setupPreviewInteraction();
   dom.spacing.value = String(state.spanLength);
+  dom.spacing.min = String(REQUIRED_SPACING);
   dom.layout.value = state.layout;
   dom.originMarker.value = state.originMarker;
   refresh();

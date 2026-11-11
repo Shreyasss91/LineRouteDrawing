@@ -139,6 +139,20 @@ export const DEFAULT_CONFIG = Object.freeze({
    * default spacing and above.
    */
   tcMaxSpanFraction: 0.75,
+  /**
+   * Minimum empty space, in px, that must remain between two drawn symbols and
+   * between a symbol and a route line's visible end.
+   *
+   * This is the single clearance policy for the whole drawing. Marker checks
+   * derive their limits from it rather than each choosing a margin.
+   */
+  markerClearance: 4,
+  /**
+   * Shortest visible piece of a route line, in px, that still reads as a
+   * connection. Below this a line is a speck rather than a segment, so the
+   * spacing is reported as too tight instead.
+   */
+  minVisibleLineLength: 6,
   /** Font size used for the FPB label inside its box, in px. */
   fpbFontSize: 11,
   /** Horizontal padding inside the FPB box, in px. */

@@ -409,6 +409,18 @@ td.cell-actions {
   flex-wrap: wrap;
 }
 
+.spacing-warning {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid #c98a2e;
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: #fdf6e7;
+  color: #6b4a12;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .preview-stage {
   position: relative;
   height: 460px;
