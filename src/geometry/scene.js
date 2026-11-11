@@ -16,6 +16,10 @@
 
 import { RENDER_PROFILES, createConfig } from '../config.js';
 import { computeBoundingBox } from './network.js';
+import { buildAssetRegistry } from './assets.js';
+import { loadCalloutLines } from '../data/schedules.js';
+import { measureBlock } from './annotations.js';
+import { buildAnnotationLayer } from './annotation_layer.js';
 import {
   clipSegmentOutsidePolygon,
   fpbRectVertices,
@@ -138,9 +142,10 @@ function nodeList(graph) {
  * @param {ReturnType<import('./network.js').buildNetwork>} network Built network.
  * @param {object|string} [profile] Render profile id or object.
  * @param {object} [configOverrides] Drawing configuration overrides.
+ * @param {object} [data] Measured data: `{loads, spanLengths, loadPlacements, spanPlacements}`.
  * @returns {object} Scene with `lines`, `poles`, `tc`, `labels` and metrics.
  */
-export function buildScene(network, profile = 'preview', configOverrides = {}) {
+export function buildScene(network, profile = 'preview', configOverrides = {}, data = {}) {
   const activeProfile = resolveProfile(profile);
   const config = createConfig(configOverrides);
   const bbox = network.boundingBox ?? computeBoundingBox(network.graph);
@@ -236,8 +241,36 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
     }
   }
 
+  // The alphabetical labels as the preview draws them, kept separately from the
+  // profile-filtered `labels` list. Annotation placement reads these regardless of
+  // profile, so a callout lands in the same place in the preview and in every
+  // export - the exports do not show the letters, but the space they occupy is
+  // still part of where things belong, and removing it from the equation would
+  // make the same project draw its callouts in two different places.
+  const labelSlots = [];
+
   for (const node of nodes) {
     const p = toPixel(node);
+    if (node.isOrigin) {
+      labelSlots.push({
+        x: p.x,
+        y: p.y,
+        text: 'Origin',
+        fontSize: config.labelFontSize,
+        offsetX: config.poleMarkerSize + 8,
+        offsetY: -config.poleMarkerSize - 9,
+      });
+    }
+    if (node.alphaLabel) {
+      labelSlots.push({
+        x: p.x,
+        y: p.y,
+        text: node.alphaLabel,
+        fontSize: config.labelFontSize,
+        offsetX: 0,
+        offsetY: -config.poleMarkerSize - 9,
+      });
+    }
     // A TC point is shown by its triangle only, and a feeder pillar box by its
     // rectangle only. Drawing an X on top of either would put two symbols at one
     // coordinate and muddy both, so the marker takes the place of the crossing.
@@ -300,6 +333,25 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
   fpb.sort(byXThenY);
   labels.sort((a, b) => a.id.localeCompare(b.id));
 
+  // The annotation layer is built last, because it has to avoid everything above:
+  // the symbols, the lines and the labels are all known by this point. It is the
+  // single source of callout and span-length placement for every renderer.
+  const annotations = buildAnnotationLayer({
+    network,
+    profile: activeProfile,
+    config,
+    lines,
+    poles,
+    tc,
+    fpb,
+    labels,
+    labelSlots,
+    width: metrics.width,
+    height: metrics.height,
+    padding: metrics.padding,
+    data,
+  });
+
   return {
     profile: activeProfile,
     config,
@@ -315,7 +367,8 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
     fpb,
     labels,
     junctions,
+    annotations,
     /** True when any visible text exists; exports must be false. */
-    hasVisibleText: labels.length > 0,
+    hasVisibleText: labels.length > 0 || annotations.callouts.length > 0,
   };
 }

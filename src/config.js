@@ -38,6 +38,7 @@ export const RENDER_PROFILES = Object.freeze({
     showTcMarkers: true,
     showFpbMarkers: true,
     showJunctionMarkers: false,
+    showAnnotations: true,
   }),
   pdf: Object.freeze({
     id: 'pdf',
@@ -48,6 +49,7 @@ export const RENDER_PROFILES = Object.freeze({
     showTcMarkers: true,
     showFpbMarkers: true,
     showJunctionMarkers: false,
+    showAnnotations: true,
   }),
   svg: Object.freeze({
     id: 'svg',
@@ -58,6 +60,7 @@ export const RENDER_PROFILES = Object.freeze({
     showTcMarkers: true,
     showFpbMarkers: true,
     showJunctionMarkers: false,
+    showAnnotations: true,
   }),
   print: Object.freeze({
     id: 'print',
@@ -68,6 +71,7 @@ export const RENDER_PROFILES = Object.freeze({
     showTcMarkers: true,
     showFpbMarkers: true,
     showJunctionMarkers: false,
+    showAnnotations: true,
   }),
 });
 
