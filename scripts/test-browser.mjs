@@ -687,6 +687,20 @@ try {
   check('the PDF carries the load when enabled', /kVA/.test(pdfText));
   check('the PDF carries a span length when enabled', /28\.5/.test(pdfText));
 
+  /* ---------------- Print ---------------- */
+
+  section('Print output');
+
+  await page.locator('#btn-print').click();
+  await page.waitForTimeout(900);
+  const printFrame = page.frames().find((f) => f !== page.mainFrame());
+  const printHtml = printFrame ? await printFrame.content().catch(() => '') : '';
+  check('a print sheet is produced', printHtml.length > 0);
+  check('the printed sheet carries no banner text', !/Span measurements incomplete/.test(printHtml));
+  check('the printed sheet carries no notice group', !/id="notice"/.test(printHtml));
+  check('the printed sheet keeps the load callout when enabled', /id="callout:/.test(printHtml));
+  check('the printed sheet keeps the markers', /<polygon /.test(printHtml));
+
   /* ---------------- Console ---------------- */
 
   section('Console');
