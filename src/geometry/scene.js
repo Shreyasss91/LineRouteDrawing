@@ -16,7 +16,11 @@
 
 import { RENDER_PROFILES, createConfig } from '../config.js';
 import { computeBoundingBox } from './network.js';
-import { clipSegmentOutsidePolygon, tcTriangleVertices } from './markers.js';
+import {
+  clipSegmentOutsidePolygon,
+  fpbRectVertices,
+  tcTriangleVertices,
+} from './markers.js';
 
 /**
  * Resolve a render profile by id.
@@ -88,6 +92,41 @@ export function measureFpbText(text, fontSize) {
   return String(text).length * fontSize * 0.62;
 }
 
+/**
+ * Build a feeder pillar box primitive.
+ *
+ * This is the single definition of an FPB box's geometry. The scene builder
+ * writes it into the scene, the renderers draw it from the scene, and the line
+ * clipping reads its corners through `fpbRectVertices`. Nothing else calculates
+ * a box size, so the symbol drawn and the hole left in the lines always agree.
+ *
+ * @param {{key: string, fpbName?: string}} node Node carrying the FPB marker.
+ * @param {{x: number, y: number}} p Pixel position of the anchor.
+ * @param {object} config Drawing configuration.
+ * @returns {object} FPB primitive, sized from its own label.
+ */
+function createFpbPrimitive(node, p, config) {
+  // The box is sized from its own text, so it always fits the label.
+  const text = config.fpbText;
+  const fontSize = config.fpbFontSize;
+  const textWidth = measureFpbText(text, fontSize);
+  const boxWidth = textWidth + config.fpbPaddingX * 2;
+  const boxHeight = fontSize + config.fpbPaddingY * 2;
+  return {
+    id: `fpb:${node.key}`,
+    x: p.x,
+    y: p.y,
+    width: boxWidth,
+    height: boxHeight,
+    text,
+    name: node.fpbName,
+    fontSize,
+    // Centre the box on the anchor so the line enters and leaves it evenly.
+    boxX: p.x - boxWidth / 2,
+    boxY: p.y - boxHeight / 2,
+  };
+}
+
 /** Convert a graph node set into a plain array of nodes. */
 function nodeList(graph) {
   return [...graph.nodes.values()];
@@ -127,9 +166,9 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
   const labels = [];
   const junctions = [];
 
-  // The TC triangles are resolved before the lines, because a line must not be
-  // drawn through the inside of the symbol. Each triangle becomes a hole the
-  // lines are trimmed against.
+  // Every marker is resolved before the lines, because no line may be drawn
+  // through the inside of a symbol. Each marker becomes a hole the lines are
+  // trimmed against, so all of their geometry is known before a line is final.
   const tcShapes = [];
   if (activeProfile.showTcMarkers) {
     for (const node of nodes) {
@@ -148,6 +187,22 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
     }
   }
 
+  // The feeder pillar boxes are resolved the same way. Their outline is read
+  // from the same primitive the renderers draw, so the trimmed gap matches the
+  // rectangle exactly.
+  const fpbShapes = [];
+  if (activeProfile.showFpbMarkers) {
+    for (const node of nodes) {
+      if (!node.fpbId) continue;
+      const shape = createFpbPrimitive(node, toPixel(node), config);
+      shape.vertices = fpbRectVertices(shape);
+      fpbShapes.push(shape);
+    }
+  }
+
+  // One hole per marker, of either kind, trimmed in a single pass.
+  const holes = [...tcShapes, ...fpbShapes];
+
   if (activeProfile.showLines) {
     for (const edge of network.graph.edges.values()) {
       const a = network.graph.nodes.get(edge.a);
@@ -155,10 +210,12 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
       if (!a || !b) continue;
       const pa = toPixel(a);
       const pb = toPixel(b);
-      // Trim the line to the outside of every TC triangle it crosses, so the
-      // route appears to enter and leave the symbol without running over it.
+      // Trim the line to the outside of every marker it crosses, so the route
+      // appears to enter and leave the symbol without running over it. This is
+      // a scene operation on pixel coordinates: the canonical network graph and
+      // its topology are never modified.
       let parts = [{ x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y }];
-      for (const shape of tcShapes) {
+      for (const shape of holes) {
         parts = parts.flatMap((part) =>
           clipSegmentOutsidePolygon(part.x1, part.y1, part.x2, part.y2, shape.vertices),
         );
@@ -198,27 +255,6 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
     if (activeProfile.showJunctionMarkers && node.neighbors.size > 2) {
       junctions.push({ id: `junction:${node.key}`, x: p.x, y: p.y, degree: node.neighbors.size });
     }
-    if (activeProfile.showFpbMarkers && node.fpbId) {
-      // The box is sized from its own text, so it always fits the label.
-      const text = config.fpbText;
-      const fontSize = config.fpbFontSize;
-      const textWidth = measureFpbText(text, fontSize);
-      const boxWidth = textWidth + config.fpbPaddingX * 2;
-      const boxHeight = fontSize + config.fpbPaddingY * 2;
-      fpb.push({
-        id: `fpb:${node.key}`,
-        x: p.x,
-        y: p.y,
-        width: boxWidth,
-        height: boxHeight,
-        text,
-        name: node.fpbName,
-        fontSize,
-        // Centre the box on the anchor so the line enters and leaves it evenly.
-        boxX: p.x - boxWidth / 2,
-        boxY: p.y - boxHeight / 2,
-      });
-    }
     if (activeProfile.showOriginLabel && node.isOrigin) {
       labels.push({
         id: `label-origin:${node.key}`,
@@ -250,6 +286,10 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
   for (const shape of tcShapes) {
     const { vertices, ...primitive } = shape;
     tc.push(primitive);
+  }
+  for (const shape of fpbShapes) {
+    const { vertices, ...primitive } = shape;
+    fpb.push(primitive);
   }
 
   // Deterministic ordering keeps diffing, tests and exports stable.

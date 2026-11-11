@@ -464,6 +464,58 @@ record(
   JSON.stringify({ boxes: fpbMarkers.boxes.length, text: fpbMarkers.texts[0], w: fpbBox.w, h: fpbBox.h }),
 );
 record('the FPB box has no X drawn over it', fpbOverlap === 0, `overlaps=${fpbOverlap}`);
+
+// The box must exclude line geometry, not merely cover it with a white fill.
+const fpbClipping = await page.evaluate(() => {
+  const svg = document.querySelector('#preview-canvas svg');
+  const box = svg.querySelector('#fpb-markers rect');
+  const left = Number(box.getAttribute('x'));
+  const top = Number(box.getAttribute('y'));
+  const right = left + Number(box.getAttribute('width'));
+  const bottom = top + Number(box.getAttribute('height'));
+  const lines = [...svg.querySelectorAll('#route-lines line')].map((el) => ({
+    x1: Number(el.getAttribute('x1')),
+    y1: Number(el.getAttribute('y1')),
+    x2: Number(el.getAttribute('x2')),
+    y2: Number(el.getAttribute('y2')),
+  }));
+  const EPS = 1e-3;
+  const inside = (x, y) => x > left + EPS && x < right - EPS && y > top + EPS && y < bottom - EPS;
+  let hits = 0;
+  for (const line of lines) {
+    for (let step = 0; step <= 60; step += 1) {
+      const t = step / 60;
+      const x = line.x1 + (line.x2 - line.x1) * t;
+      const y = line.y1 + (line.y2 - line.y1) * t;
+      if (inside(x, y)) hits += 1;
+    }
+  }
+  // A trimmed line still has to reach the outline, or the route looks broken.
+  const meetsEdge = lines.some((line) =>
+    [
+      [line.x1, line.y1],
+      [line.x2, line.y2],
+    ].some(([x, y]) => {
+      const onVertical = Math.abs(x - left) < 0.01 || Math.abs(x - right) < 0.01;
+      const onHorizontal = Math.abs(y - top) < 0.01 || Math.abs(y - bottom) < 0.01;
+      return (
+        (onVertical && y >= top - 0.01 && y <= bottom + 0.01) ||
+        (onHorizontal && x >= left - 0.01 && x <= right + 0.01)
+      );
+    }),
+  );
+  return { hits, meetsEdge, lines: lines.length };
+});
+record(
+  'no route line is drawn inside the FPB box',
+  fpbClipping.hits === 0,
+  JSON.stringify(fpbClipping),
+);
+record(
+  'the trimmed line still meets the FPB box',
+  fpbClipping.meetsEdge === true,
+  `a line ends on the box outline: ${fpbClipping.meetsEdge}`,
+);
 record(
   'the table records the marker kind',
   (await page.locator('#route-rows tr').nth(1).locator('td').nth(4).textContent()).trim() === 'FPB',

@@ -51,7 +51,9 @@ Any static file server works equally well. There is nothing to compile.
   left empty rather than being crossed by the line. It never takes a
   letter. One TC point is called `TC`; several are `TC1`, `TC2`, and so on.
 - An **FPB** (feeder pillar box) is drawn as a rectangle sized to its own label
-  with `FPB` written inside it. It never takes a letter either. One FPB is called
+  with `FPB` written inside it. Like the TC triangle, route lines stop at the
+  rectangle's edge and resume on the other side, so nothing is drawn inside the
+  box. It never takes a letter either. One FPB is called
   `FPB`; several are `FPB1`, `FPB2`, and so on. A destination cannot be a TC
   point and an FPB at the same time.
 - Neither a TC point nor an FPB ever gets a crossing marker on top of its own

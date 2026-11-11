@@ -44,6 +44,33 @@ export function tcTrianglePoints(tc, format = (value) => String(value)) {
 }
 
 /**
+ * Outline of a feeder pillar box, in pixel space, as four points.
+ *
+ * The box is a rectangle centred on its anchor. Its size is derived from its
+ * own label, so the four corners are read from the same FPB scene primitive the
+ * renderers draw: `boxX`, `boxY`, `width` and `height`. Nothing here computes a
+ * size of its own, so the hole left in the line and the rectangle actually
+ * drawn can never disagree.
+ *
+ * The vertices are returned clockwise from the top-left corner.
+ *
+ * @param {{boxX: number, boxY: number, width: number, height: number}} fpb FPB primitive.
+ * @returns {{x: number, y: number}[]} Top-left, top-right, bottom-right, bottom-left.
+ */
+export function fpbRectVertices(fpb) {
+  const left = fpb.boxX;
+  const top = fpb.boxY;
+  const right = fpb.boxX + fpb.width;
+  const bottom = fpb.boxY + fpb.height;
+  return [
+    { x: left, y: top },
+    { x: right, y: top },
+    { x: right, y: bottom },
+    { x: left, y: bottom },
+  ];
+}
+
+/**
  * Segments of a segment that lie outside a convex polygon.
  *
  * Route lines run between two node centres, so a line touching a TC triangle
