@@ -409,6 +409,22 @@ td.cell-actions {
   flex-wrap: wrap;
 }
 
+.project-toolbar {
+  margin-top: -4px;
+}
+
+.persistence-notice {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid #b85c4a;
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: #fdf0ee;
+  color: #6b2c20;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .spacing-warning {
   margin: 0 0 10px;
   padding: 8px 10px;

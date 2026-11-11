@@ -13,7 +13,7 @@
 
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const BASE = process.env.BASE_URL ?? 'http://127.0.0.1:8123/';
@@ -38,6 +38,11 @@ page.on('pageerror', (err) => consoleErrors.push(String(err)));
 await mkdir(OUT, { recursive: true });
 
 await page.goto(BASE, { waitUntil: 'networkidle' });
+// Start from a known state. The tool now restores the last project from browser
+// storage, so a leftover project from an earlier run would make the counts below
+// depend on what happened previously.
+await page.evaluate(() => localStorage.clear());
+await page.reload({ waitUntil: 'networkidle' });
 await page.waitForSelector('#preview-canvas svg', { timeout: 10000 });
 
 // ---- 1. example loaded and drawn -------------------------------------
@@ -115,7 +120,7 @@ const afterTransform = await page.evaluate(() => document.querySelector('#previe
 record('pan moves the drawing', beforeTransform !== afterTransform, `${beforeTransform} -> ${afterTransform}`);
 
 // ---- 4. adding a route updates the drawing ---------------------------
-await page.selectOption('#field-from', { label: 'Origin' });
+await page.selectOption('#field-from', { label: 'Origin (Pole)' });
 await page.selectOption('#field-direction', 'west');
 await page.fill('#field-spans', '2');
 await page.click('#btn-save-route');
@@ -146,7 +151,7 @@ await page.click('#btn-load-example');
 await page.waitForTimeout(150);
 
 // ---- 6. validation feedback -----------------------------------------
-await page.selectOption('#field-from', { label: 'Origin' });
+await page.selectOption('#field-from', { label: 'Origin (Pole)' });
 await page.fill('#field-spans', '0');
 await page.click('#btn-save-route');
 const formError = await page.textContent('#form-error');
@@ -232,7 +237,7 @@ record('print action runs and reports a page layout', /print dialog/i.test(print
 
 // ---- 10. invalid network blocks export -------------------------------
 await page.click('#btn-clear');
-await page.selectOption('#field-from', { label: 'Origin' });
+await page.selectOption('#field-from', { label: 'Origin (Pole)' });
 await page.fill('#field-spans', '1');
 await page.click('#btn-save-route');
 // Delete the only route: the list is now empty, so export is refused.
@@ -270,6 +275,11 @@ const fromOptions = await page.evaluate(() =>
 record(
   'dropdown offers the TC point by its identifier',
   fromOptions.includes('TC'),
+  fromOptions.join(','),
+);
+record(
+  'the Origin label names it as a pole by default',
+  fromOptions.includes('Origin (Pole)'),
   fromOptions.join(','),
 );
 
@@ -692,7 +702,179 @@ record(
   JSON.stringify(restoredState),
 );
 
-// ---- 20. console cleanliness ----------------------------------------
+// ---- 20. Origin-aware dropdown labels -------------------------------
+for (const [marker, expected] of [
+  ['plain', 'Origin (Pole)'],
+  ['tc', 'Origin (TC point)'],
+  ['fpb', 'Origin (FPB point)'],
+]) {
+  await page.click('#btn-load-example');
+  await page.waitForTimeout(120);
+  await page.selectOption('#field-origin-marker', marker);
+  await page.waitForTimeout(200);
+  const labels = await page.evaluate(() =>
+    [...document.querySelectorAll('#field-from option')].map((o) => o.textContent),
+  );
+  const originValue = await page.evaluate(
+    () => [...document.querySelectorAll('#field-from option')].find((o) => o.value === 'origin')?.value,
+  );
+  record(
+    `the Origin is labelled "${expected}" when drawn as ${marker}, keeping its id`,
+    labels.includes(expected) && originValue === 'origin',
+    labels.join(','),
+  );
+}
+
+// ---- 21. automatic persistence, restore and project files ------------
+await page.click('#btn-load-example');
+await page.waitForTimeout(150);
+// Also exercise the three-route panel state that the persistence tests skip.
+await page.selectOption('#field-origin-marker', 'fpb');
+await page.waitForTimeout(150);
+await page.fill('#field-spacing', '52');
+await page.locator('#field-spacing').dispatchEvent('change');
+await page.selectOption('#field-layout', 'a4_portrait');
+await page.waitForTimeout(300);
+
+const beforeReload = await page.evaluate(() => ({
+  rows: document.querySelectorAll('#route-rows tr').length,
+  origin: document.querySelector('#field-origin-marker').value,
+  spacing: document.querySelector('#field-spacing').value,
+  layout: document.querySelector('#field-layout').value,
+  edges: new Set(
+    [...document.querySelectorAll('#preview-canvas svg #route-lines line')].map((el) =>
+      el.getAttribute('data-edge'),
+    ),
+  ).size,
+  stored: Boolean(localStorage.getItem('line-route-drawing:v1:project')),
+}));
+record(
+  'changes are saved to browser storage automatically',
+  beforeReload.stored === true,
+  JSON.stringify(beforeReload),
+);
+
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForSelector('#preview-canvas svg');
+await page.waitForTimeout(300);
+const afterReload = await page.evaluate(() => ({
+  rows: document.querySelectorAll('#route-rows tr').length,
+  origin: document.querySelector('#field-origin-marker').value,
+  spacing: document.querySelector('#field-spacing').value,
+  layout: document.querySelector('#field-layout').value,
+  edges: new Set(
+    [...document.querySelectorAll('#preview-canvas svg #route-lines line')].map((el) =>
+      el.getAttribute('data-edge'),
+    ),
+  ).size,
+  fromLabel: [...document.querySelectorAll('#field-from option')].find(
+    (o) => o.value === 'origin',
+  )?.textContent,
+}));
+const restoreMatches =
+  beforeReload.rows === afterReload.rows &&
+  beforeReload.origin === afterReload.origin &&
+  beforeReload.spacing === afterReload.spacing &&
+  beforeReload.layout === afterReload.layout &&
+  beforeReload.edges === afterReload.edges;
+record(
+  'a reload restores the drawing and every setting exactly',
+  restoreMatches,
+  `${JSON.stringify(afterReload)} vs ${JSON.stringify(beforeReload)}`,
+);
+record(
+  'a restored project shows the Origin as an FPB point in the dropdown',
+  afterReload.fromLabel === 'Origin (FPB point)',
+  String(afterReload.fromLabel),
+);
+
+// Save the project to a file.
+const projectDownload = await Promise.all([
+  page.waitForEvent('download'),
+  page.click('#btn-save-project'),
+]).then(([d]) => d);
+const savedProjectPath = resolve(OUT, 'saved-project.json');
+await projectDownload.saveAs(savedProjectPath);
+const savedDocument = JSON.parse(readFileSync(savedProjectPath, 'utf8'));
+record(
+  'Save project writes a versioned file with no derived data',
+  savedDocument.format === 'line-route-drawing-project' &&
+    savedDocument.schemaVersion === 1 &&
+    Boolean(savedDocument.metadata.savedAt) &&
+    savedDocument.project.routes.length === beforeReload.rows &&
+    !/"(graph|edges|nodes|scene|bbox|viewBox)"/.test(readFileSync(savedProjectPath, 'utf8')),
+  `${projectDownload.suggestedFilename()}, ${savedDocument.project.routes.length} routes`,
+);
+
+// Clear, then load the file back.
+await page.click('#btn-clear');
+await page.waitForTimeout(200);
+await page.setInputFiles('#field-project-file', savedProjectPath);
+await page.waitForTimeout(500);
+const afterLoad = await page.evaluate(() => ({
+  rows: document.querySelectorAll('#route-rows tr').length,
+  origin: document.querySelector('#field-origin-marker').value,
+  spacing: document.querySelector('#field-spacing').value,
+  layout: document.querySelector('#field-layout').value,
+  edges: new Set(
+    [...document.querySelectorAll('#preview-canvas svg #route-lines line')].map((el) =>
+      el.getAttribute('data-edge'),
+    ),
+  ).size,
+}));
+record(
+  'Load project rebuilds an equivalent drawing and settings',
+  JSON.stringify(afterLoad) ===
+    JSON.stringify({
+      rows: afterReload.rows,
+      origin: afterReload.origin,
+      spacing: afterReload.spacing,
+      layout: afterReload.layout,
+      edges: afterReload.edges,
+    }),
+  JSON.stringify(afterLoad),
+);
+
+// An invalid import must leave the project exactly as it was.
+writeFileSync(resolve(OUT, 'not-a-project.json'), '{ this is not json');
+await page.setInputFiles('#field-project-file', resolve(OUT, 'not-a-project.json'));
+await page.waitForTimeout(400);
+const afterBadImport = await page.evaluate(() => ({
+  rows: document.querySelectorAll('#route-rows tr').length,
+  notice: (() => {
+    const n = document.querySelector('#persistence-notice');
+    return { hidden: n.hidden, text: n.textContent.trim() };
+  })(),
+}));
+record(
+  'an invalid import is refused and leaves the drawing untouched',
+  afterBadImport.rows === afterLoad.rows &&
+    afterBadImport.notice.hidden === false &&
+    afterBadImport.notice.text.length > 0 &&
+    !/SyntaxError|Unexpected token|undefined/.test(afterBadImport.notice.text),
+  JSON.stringify(afterBadImport),
+);
+
+// Clearing persists, so a reload stays empty.
+await page.click('#btn-clear');
+await page.waitForTimeout(250);
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(500);
+const afterClearReload = await page.evaluate(() => ({
+  rows: document.querySelectorAll('#route-rows tr').length,
+  hasDrawing: Boolean(document.querySelector('#preview-canvas svg')),
+}));
+record(
+  'a cleared project stays empty after a reload',
+  afterClearReload.rows === 0 && afterClearReload.hasDrawing === false,
+  JSON.stringify(afterClearReload),
+);
+
+// Leave the page on the example for the checks that follow.
+await page.click('#btn-load-example');
+await page.waitForTimeout(200);
+
+// ---- 22. console cleanliness ----------------------------------------
 record('no console or page errors', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 await page.screenshot({ path: resolve(OUT, 'preview.png'), fullPage: true });

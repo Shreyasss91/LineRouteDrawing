@@ -70,19 +70,40 @@ export function buildFromState(state) {
  * @param {number} index Position being edited; pass `routes.length` for a new row.
  * @returns {Array<{id: string, label: string, kind: string}>}
  */
-export function availableSources(routes, index) {
+export function availableSources(routes, index, options = {}) {
   const prefix = routes.slice(0, index);
-  const network = buildNetwork(prefix);
+  const network = buildNetwork(prefix, { originMarker: options.originMarker });
   return network.endpoints.map((endpoint) => ({
     id: endpoint.id,
-    label: endpointLabel(endpoint),
+    label: endpointLabel(endpoint, options.originMarker),
     kind: endpoint.kind,
   }));
 }
 
-/** Human-readable dropdown label for an endpoint. */
-export function endpointLabel(endpoint) {
-  if (endpoint.kind === 'origin') return 'Origin';
+/** Label suffix for the Origin's own marker, so the dropdown matches the drawing. */
+const ORIGIN_MARKER_LABEL = Object.freeze({
+  plain: 'Pole',
+  tc: 'TC point',
+  fpb: 'FPB point',
+});
+
+/**
+ * Human-readable dropdown label for an endpoint.
+ *
+ * The Origin is always the same node, but it can be drawn as a plain pole, a TC
+ * point or an FPB box. Naming it simply "Origin" left the dropdown describing a
+ * point that the drawing no longer showed, so the label carries the marker type
+ * the user chose. Its internal id stays `origin` either way.
+ *
+ * @param {{kind: string, name: string, displayName?: string}} endpoint Endpoint.
+ * @param {'plain'|'tc'|'fpb'} [originMarker] How the Origin itself is drawn.
+ * @returns {string} Label to show in the dropdown.
+ */
+export function endpointLabel(endpoint, originMarker = 'plain') {
+  if (endpoint.kind === 'origin') {
+    const suffix = ORIGIN_MARKER_LABEL[originMarker] ?? ORIGIN_MARKER_LABEL.plain;
+    return `Origin (${suffix})`;
+  }
   // TC points are named TC when unique and TC1/TC2 when several exist; feeder
   // pillar boxes follow the same rule with FPB. Both come from displayName.
   return endpoint.displayName ?? endpoint.name;
@@ -99,15 +120,16 @@ export function endpointLabel(endpoint) {
  * @param {Array<object>} routes Route list.
  * @returns {{id: string, label: string}} Source to preselect.
  */
-export function latestSource(routes) {
-  if (!routes || routes.length === 0) return { id: 'origin', label: 'Origin' };
-  const network = buildNetwork(routes);
+export function latestSource(routes, options = {}) {
+  const originLabel = endpointLabel({ kind: 'origin', name: 'Origin' }, options.originMarker);
+  if (!routes || routes.length === 0) return { id: 'origin', label: originLabel };
+  const network = buildNetwork(routes, { originMarker: options.originMarker });
   const lastResolved = [...network.routes].reverse().find((route) => route.ok);
   const endpoint = lastResolved
     ? network.endpoints.find((e) => e.id === lastResolved.destinationId)
     : null;
-  if (!endpoint) return { id: 'origin', label: 'Origin' };
-  return { id: endpoint.id, label: endpointLabel(endpoint) };
+  if (!endpoint) return { id: 'origin', label: originLabel };
+  return { id: endpoint.id, label: endpointLabel(endpoint, options.originMarker) };
 }
 
 /**
@@ -120,13 +142,17 @@ export function latestSource(routes) {
  * @param {string} currentFrom Currently referenced endpoint id.
  * @returns {Array<{id: string, label: string}>}
  */
-export function sourcesForRow(routes, index, currentFrom) {
-  const sources = availableSources(routes, index);
+export function sourcesForRow(routes, index, currentFrom, options = {}) {
+  const sources = availableSources(routes, index, options);
   if (currentFrom && !sources.some((s) => s.id === currentFrom)) {
-    const full = buildNetwork(routes.slice(0, index));
+    const full = buildNetwork(routes.slice(0, index), { originMarker: options.originMarker });
     const existing = full.endpoints.find((e) => e.id === currentFrom);
     if (existing) {
-      sources.push({ id: existing.id, label: endpointLabel(existing), kind: existing.kind });
+      sources.push({
+        id: existing.id,
+        label: endpointLabel(existing, options.originMarker),
+        kind: existing.kind,
+      });
     }
   }
   return sources;

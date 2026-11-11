@@ -38,10 +38,31 @@ Any static file server works equally well. There is nothing to compile.
    never changes the topology.
 5. **Download PDF**, **Download SVG for Office**, or **Print drawing**.
 
+### Keeping a project
+
+Your work is remembered in this browser automatically, after every change, so
+closing the tab and coming back later resumes the same drawing on the same
+computer. **Save project** writes it to a `.json` file you can keep, copy to
+another machine or email; **Load project** opens one. Nothing is uploaded
+anywhere: the file is the only thing that leaves the browser.
+
+A project file records only what you typed: the route rows, the Origin symbol,
+the span spacing and the page layout. The drawing itself is rebuilt from those
+when the file is opened, so an edited file cannot smuggle in a wrong picture.
+
+Loading is all-or-nothing. A file that is damaged, is not a project file, or was
+written by a newer version of this tool is refused with a message saying which,
+and the drawing on screen is left exactly as it was. Loading over an existing
+drawing asks first. **Clear all** is remembered too, so a reload after clearing
+stays empty rather than bringing the old drawing back.
+
 ### How names appear
 
 - The starting point is **Origin**. It is drawn as a pole (an X) unless you set
   it to be a TC point or an FPB, in which case it shows that symbol and no X.
+  The **From** list names it after the symbol you chose, as `Origin (Pole)`,
+  `Origin (TC point)` or `Origin (FPB point)`, so it is never mistaken for a TC
+  or FPB further along the route.
 - Endpoints get the letters **A, B, C, ...** in the order they are created, so a
   new branch is named in the drawing the moment it is added. A label never moves
   when an endpoint is reused.
@@ -110,6 +131,16 @@ The example is stored as data in `src/config.js` and is loaded by the
 - Shared endpoints, partially or fully overlapping routes, and routes that meet
   at the same point are merged into one drawing. A point is drawn once, with a
   single X symbol, however many routes pass through it.
+- **Span spacing has a minimum, 39 px by default.** Below it the symbols stop
+  fitting between the points they mark: an FPB box is wider than the gap, so it
+  swallows the neighbouring pole and can erase a whole span, and the shortest
+  visible piece of line becomes too small to read. The limit is not a guess and
+  not a separate setting; it is measured from the same marker shapes the
+  renderers draw, so it moves with them if their size ever changes. When the
+  spacing is too tight, a warning names the shortest safe spacing and the three
+  export buttons are disabled. The drawing stays visible and the number you
+  typed is kept, so you can see the effect and decide; nothing is changed for
+  you, and the topology never changes with spacing.
 
 ## Project layout
 
@@ -170,4 +201,5 @@ only browser and Node built-ins.
   for SVG import and is not claimed to be shape-by-route editable.
 - Labels are suppressed entirely in exports rather than moved off-canvas, so an
   exported drawing carries no text at all.
-- No persistence: reloading the page starts again from the example.
+- The remembered project lives in one browser on one computer. Clearing the
+  browser's site data removes it, which is why **Save project** exists.

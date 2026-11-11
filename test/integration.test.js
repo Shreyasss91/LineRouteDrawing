@@ -61,7 +61,11 @@ test('endpoint labels read naturally for the dropdown', () => {
   const origin = network.endpoints.find((e) => e.kind === 'origin');
   const alpha = network.endpoints.find((e) => e.kind === 'endpoint' && e.position.y === -1 && e.position.x === 4);
   const tc = network.endpoints.find((e) => e.kind === 'tc');
-  assert.equal(endpointLabel(origin), 'Origin');
+  // The Origin's label names the symbol it is drawn as, so the dropdown cannot
+  // describe something the drawing does not show.
+  assert.equal(endpointLabel(origin), 'Origin (Pole)');
+  assert.equal(endpointLabel(origin, 'tc'), 'Origin (TC point)');
+  assert.equal(endpointLabel(origin, 'fpb'), 'Origin (FPB point)');
   assert.equal(endpointLabel(alpha), 'B');
   assert.equal(endpointLabel(tc), 'TC', 'a single TC point is named TC');
 });
@@ -149,7 +153,11 @@ test('the example SVG and PDF are produced from identical geometry', () => {
 
 test('a new route preselects the most recently created endpoint', () => {
   // Nothing yet: the Origin is the only starting point.
-  assert.deepEqual(latestSource([]), { id: 'origin', label: 'Origin' });
+  assert.deepEqual(latestSource([]), { id: 'origin', label: 'Origin (Pole)' });
+  assert.deepEqual(latestSource([], { originMarker: 'fpb' }), {
+    id: 'origin',
+    label: 'Origin (FPB point)',
+  });
 
   // After one route, its destination is preselected. That destination has not
   // been reused, so it carries no letter yet; the id is what matters.

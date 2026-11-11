@@ -12,6 +12,12 @@ import { EXAMPLE_ROUTES, createConfig, PAGE_LAYOUTS } from '../config.js';
 import { buildNetwork } from '../geometry/network.js';
 import { buildScene } from '../geometry/scene.js';
 import { checkSpanClearance, requiredSpanLength } from '../geometry/clearance.js';
+import {
+  parseProjectJson,
+  projectFileName,
+  serializeProjectJson,
+} from './project.js';
+import { loadFromStorage, saveToStorage } from './storage.js';
 import { renderSceneToSvg } from '../render/svg.js';
 import { renderSceneToPdf } from '../render/pdf.js';
 import {
@@ -47,6 +53,10 @@ const dom = {
   fpb: el('field-fpb'),
   originMarker: el('field-origin-marker'),
   spacingWarning: el('spacing-warning'),
+  persistenceNotice: el('persistence-notice'),
+  saveProject: el('btn-save-project'),
+  loadProject: el('btn-load-project'),
+  projectFile: el('field-project-file'),
   saveRoute: el('btn-save-route'),
   cancelEdit: el('btn-cancel-edit'),
   formError: el('form-error'),
@@ -75,6 +85,174 @@ const state = createState();
 const view = { zoom: 1, x: 0, y: 0 };
 /** Latest derived model, refreshed on every change. */
 let current = { network: buildNetwork([]), scene: null };
+
+/* ------------------------------------------------------------------ */
+/* Persistence                                                         */
+/* ------------------------------------------------------------------ */
+
+/** Anything reported about saving, shown discreetly rather than as a dialog. */
+let persistenceNotice = null;
+
+/**
+ * Remember the current project in the browser.
+ *
+ * Called after every action that changes what the user has authored. A failure
+ * is reported but never thrown: losing the ability to remember is not a reason
+ * to stop them drawing.
+ */
+function persistProject() {
+  const result = saveToStorage({
+    routes: state.routes,
+    originMarker: state.originMarker,
+    spanLength: state.spanLength,
+    layout: state.layout,
+  });
+  persistenceNotice = result.ok ? null : result.message;
+  renderPersistenceNotice();
+  return result;
+}
+
+/** Show or clear the storage notice next to the project actions. */
+function renderPersistenceNotice() {
+  if (!dom.persistenceNotice) return;
+  if (!persistenceNotice) {
+    dom.persistenceNotice.hidden = true;
+    dom.persistenceNotice.textContent = '';
+    return;
+  }
+  dom.persistenceNotice.hidden = false;
+  dom.persistenceNotice.textContent = persistenceNotice;
+}
+
+/**
+ * Apply a validated project to the live state.
+ *
+ * The project arrives already validated and rebuilt through the geometry
+ * engine, so this only assigns it. Derived data is rebuilt by `refresh`, which
+ * is the same path a fresh example takes.
+ *
+ * @param {object} project Validated project.
+ * @param {{refit?: boolean}} [options]
+ */
+function applyProject(project, options = {}) {
+  state.routes = project.routes.map((route) =>
+    createRoute({
+      from: route.from,
+      direction: route.direction,
+      spans: route.spans,
+      tc: route.tc,
+      fpb: route.fpb,
+    }),
+  );
+  state.originMarker = project.originMarker;
+  state.spanLength = project.spanLength;
+  state.layout = project.layout;
+  state.selectedId = null;
+
+  dom.spacing.value = String(state.spanLength);
+  dom.layout.value = state.layout;
+  dom.originMarker.value = state.originMarker;
+  clearForm();
+  refresh({ refit: options.refit ?? true });
+}
+
+/**
+ * Restore the remembered project at startup.
+ *
+ * Precedence: a readable project wins; nothing remembered falls through to the
+ * example; an unreadable project is reported and left alone rather than
+ * overwritten, with the example shown so the session is still usable.
+ *
+ * @returns {boolean} True when a remembered project was applied.
+ */
+function restoreOrStart() {
+  const result = loadFromStorage();
+
+  if (result.status === 'ok') {
+    applyProject(result.project, { refit: true });
+    return true;
+  }
+
+  if (result.status === 'invalid') {
+    // Deliberately do not overwrite: the user's data is still there and a
+    // corrected build may be able to read it.
+    persistenceNotice = result.message;
+    renderPersistenceNotice();
+    loadExample();
+    return false;
+  }
+
+  if (result.status === 'unavailable') {
+    persistenceNotice = result.message;
+    renderPersistenceNotice();
+  }
+
+  loadExample();
+  return false;
+}
+
+/** Save the project to a downloadable file. */
+function saveProjectFile() {
+  const text = serializeProjectJson({
+    routes: state.routes,
+    originMarker: state.originMarker,
+    spanLength: state.spanLength,
+    layout: state.layout,
+  });
+  const blob = new Blob([text], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = projectFileName();
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoking immediately can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Read a chosen file and open it as the project.
+ *
+ * Nothing is applied until the whole file has been validated, so a bad file
+ * leaves the current drawing exactly as it was. The text is only ever parsed as
+ * data: nothing from the file is executed.
+ *
+ * @param {File} file Chosen file.
+ */
+async function loadProjectFile(file) {
+  let text;
+  try {
+    text = await file.text();
+  } catch {
+    persistenceNotice = 'That file could not be read. Choose a project file saved by this tool.';
+    renderPersistenceNotice();
+    return;
+  }
+
+  const parsed = parseProjectJson(text);
+  if (!parsed.ok) {
+    persistenceNotice = parsed.message;
+    renderPersistenceNotice();
+    return;
+  }
+
+  const hasWork = state.routes.length > 0;
+  if (hasWork) {
+    const proceed = window.confirm(
+      'Open this project and replace the drawing on screen? ' +
+        'The current drawing is not kept.',
+    );
+    if (!proceed) return;
+  }
+
+  applyProject(parsed.project, { refit: true });
+  persistenceNotice = null;
+  renderPersistenceNotice();
+  // Opening a project is a change like any other, so it becomes what a reload
+  // restores.
+  persistProject();
+}
 
 /* ------------------------------------------------------------------ */
 /* Derived model                                                       */
@@ -263,17 +441,21 @@ function refreshFromOptions() {
   const currentRoute = state.selectedId ? state.routes.find((r) => r.id === state.selectedId) : null;
   const currentFrom = currentRoute ? currentRoute.from : dom.from.value;
 
-  const options = sourcesForRow(state.routes, index, currentFrom);
+  const options = sourcesForRow(state.routes, index, currentFrom, {
+    originMarker: state.originMarker,
+  });
   // While editing a row, the row's own source is the value that must survive
   // the rebuild. When adding a new route, the most recently created endpoint
   // is preselected, which is the common case: continue from where you stopped.
-  const previous = currentRoute ? currentRoute.from : latestSource(state.routes).id;
+  const previous = currentRoute
+    ? currentRoute.from
+    : latestSource(state.routes, { originMarker: state.originMarker }).id;
 
   dom.from.innerHTML = '';
   if (options.length === 0) {
     const opt = document.createElement('option');
     opt.value = '';
-    opt.textContent = 'Origin';
+    opt.textContent = endpointLabel({ kind: 'origin', name: 'Origin' }, state.originMarker);
     dom.from.appendChild(opt);
     return;
   }
@@ -441,6 +623,7 @@ function handleSubmit(event) {
 
   clearForm();
   refresh({ refit: state.routes.length > 0 });
+  persistProject();
 }
 
 function handleTableClick(event) {
@@ -459,6 +642,7 @@ function handleTableClick(event) {
     state.routes.splice(index, 1);
     if (state.selectedId === row.dataset.id) clearForm();
     refresh({ refit: true });
+    persistProject();
   }
 }
 
@@ -468,12 +652,16 @@ function loadExample() {
   state.routes = resolveExampleRoutes(EXAMPLE_ROUTES, nextRouteIdValue);
   clearForm();
   refresh({ refit: true });
+  persistProject();
 }
 
 function clearAll() {
   state.routes = [];
   clearForm();
   refresh({ refit: false });
+  // Clearing is a project state like any other. Saving it means a reload shows
+  // an empty drawing rather than resurrecting what was just cleared.
+  persistProject();
 }
 
 /* ------------------------------------------------------------------ */
@@ -625,6 +813,15 @@ function setupEventListeners() {
   dom.pdf.addEventListener('click', exportPdf);
   dom.svg.addEventListener('click', exportSvg);
   dom.print.addEventListener('click', printDrawing);
+  dom.saveProject.addEventListener('click', saveProjectFile);
+  dom.loadProject.addEventListener('click', () => dom.projectFile.click());
+  dom.projectFile.addEventListener('change', () => {
+    const file = dom.projectFile.files && dom.projectFile.files[0];
+    if (!file) return;
+    loadProjectFile(file);
+    // Reset so choosing the same file twice fires `change` again.
+    dom.projectFile.value = '';
+  });
 
   dom.spacing.addEventListener('change', () => {
     const value = Number(dom.spacing.value);
@@ -633,16 +830,20 @@ function setupEventListeners() {
     dom.spacing.value = String(clamped);
     state.spanLength = clamped;
     refresh({ refit: true });
+    persistProject();
   });
 
   dom.originMarker.addEventListener('change', () => {
     state.originMarker = dom.originMarker.value;
+    // Rebuild the dropdown so its Origin label matches the symbol now drawn.
     refresh({ refit: false });
+    persistProject();
   });
 
   dom.layout.addEventListener('change', () => {
     state.layout = dom.layout.value;
     updateOutputButtons();
+    persistProject();
   });
 
   // Keep the dropdown honest while the user changes the form.
@@ -664,9 +865,10 @@ function boot() {
   dom.layout.value = state.layout;
   dom.originMarker.value = state.originMarker;
   refresh();
-  // Start from the example so the tool is immediately useful.
-  loadExample();
   dom.exportStatus.textContent = '';
+  // A remembered project is restored; otherwise the example keeps the tool
+  // immediately useful on a first visit.
+  restoreOrStart();
 }
 
 if (document.readyState === 'loading') {

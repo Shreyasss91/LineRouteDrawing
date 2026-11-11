@@ -68,6 +68,13 @@
           <button type="button" id="btn-clear" class="btn btn-quiet">Clear all</button>
         </div>
 
+        <div class="table-toolbar project-toolbar">
+          <button type="button" id="btn-save-project" class="btn">Save project</button>
+          <button type="button" id="btn-load-project" class="btn">Load project</button>
+          <input id="field-project-file" type="file" accept="application/json,.json" hidden />
+        </div>
+        <p id="persistence-notice" class="persistence-notice" role="status" hidden></p>
+
         <div class="table-wrap">
           <table>
             <thead>
@@ -129,7 +136,7 @@
         </div>
         <p class="hint">
           PDF, SVG and print hide the Origin and alphabetical labels. X symbols,
-          route lines and TC triangles are always drawn.
+          route lines, TC triangles and FPB boxes are always drawn.
         </p>
         <p id="export-status" class="export-status" role="status"></p>
       </section>
