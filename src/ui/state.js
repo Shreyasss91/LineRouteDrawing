@@ -13,6 +13,7 @@
  */
 
 import { buildNetwork } from '../geometry/network.js';
+import { createLoadSchedule, createSpanLengths } from '../data/schedules.js';
 
 export { normalizeMarkerKind } from '../geometry/network.js';
 
@@ -86,6 +87,16 @@ export function createState(exampleRoutes = []) {
     originMarker: 'plain',
     spanLength: 40,
     layout: 'a4_landscape',
+    /**
+     * Measured data, kept apart from the drawing settings on purpose. The spacing
+     * is how the route is laid out on the page; a load and a span length are facts
+     * about the installation. Changing one must never change the other, so they are
+     * separate fields rather than one record with two uses.
+     */
+    loads: createLoadSchedule(),
+    spanLengths: createSpanLengths(),
+    loadPlacements: {},
+    spanPlacements: {},
   };
 }
 

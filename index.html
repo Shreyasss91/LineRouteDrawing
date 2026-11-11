@@ -108,6 +108,132 @@
         <div id="error-list" class="error-list" role="alert" hidden></div>
       </section>
 
+      <section class="panel panel-network" aria-labelledby="network-heading">
+        <div class="network-header">
+          <h2 id="network-heading">Network data</h2>
+          <div class="network-summary" id="network-summary" aria-live="polite"></div>
+        </div>
+
+        <div class="network-tabs" role="tablist" aria-label="Network data sections">
+          <button type="button" class="tab is-active" role="tab" id="tab-loads"
+                  aria-selected="true" aria-controls="panel-loads">Node loads</button>
+          <button type="button" class="tab" role="tab" id="tab-spans"
+                  aria-selected="false" aria-controls="panel-spans">Span lengths</button>
+        </div>
+
+        <div id="panel-loads" role="tabpanel" aria-labelledby="tab-loads">
+          <p class="hint">
+            Add any number of loads to a pole or feeder pillar. Each is recorded with its own
+            unit and they are never added together, because kVA, kW, kVAr and HP do not add.
+          </p>
+          <div class="network-form" id="load-form">
+            <label class="field">
+              <span>Point</span>
+              <select id="field-load-node"></select>
+            </label>
+            <label class="field field-narrow">
+              <span>Value</span>
+              <input id="field-load-value" type="number" min="0" step="any" placeholder="e.g. 25" />
+            </label>
+            <label class="field field-narrow">
+              <span>Unit</span>
+              <select id="field-load-unit">
+                <option value="kVA">kVA</option>
+                <option value="kW">kW</option>
+                <option value="kVAr">kVAr</option>
+                <option value="HP">HP</option>
+              </select>
+            </label>
+            <button type="button" id="btn-add-load" class="btn btn-primary">Add load</button>
+          </div>
+          <p id="load-form-error" class="form-error" role="alert" hidden></p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Point</th>
+                  <th scope="col">Load ID</th>
+                  <th scope="col">Value</th>
+                  <th scope="col">Unit</th>
+                  <th scope="col"><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="load-rows"></tbody>
+            </table>
+            <p id="load-empty" class="empty-state">No loads recorded yet.</p>
+          </div>
+
+          <div class="network-actions">
+            <button type="button" id="btn-loads-tsv" class="btn">Copy as spreadsheet</button>
+            <button type="button" id="btn-loads-csv" class="btn">Export CSV</button>
+            <button type="button" id="btn-loads-import" class="btn">Import CSV or paste</button>
+          </div>
+        </div>
+
+        <div id="panel-spans" role="tabpanel" aria-labelledby="tab-spans" hidden>
+          <p class="hint">
+            A span is one physical run of cable between two poles. Its length is a survey
+            figure in metres: changing it moves nothing on the drawing, and an unmeasured
+            span stays blank rather than being given a guess.
+          </p>
+          <div class="network-form">
+            <label class="field field-narrow">
+              <span>Default length (m)</span>
+              <input id="field-default-length" type="number" min="0" step="any" placeholder="e.g. 30" />
+            </label>
+            <button type="button" id="btn-apply-default" class="btn">Apply to unmeasured spans</button>
+          </div>
+
+          <div class="table-wrap table-wrap-tall">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Span ID</th>
+                  <th scope="col">From</th>
+                  <th scope="col">To</th>
+                  <th scope="col">Length (m)</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody id="span-rows"></tbody>
+            </table>
+            <p id="span-empty" class="empty-state">No spans yet.</p>
+          </div>
+
+          <div class="network-actions">
+            <button type="button" id="btn-spans-tsv" class="btn">Copy as spreadsheet</button>
+            <button type="button" id="btn-spans-csv" class="btn">Export CSV</button>
+            <button type="button" id="btn-spans-import" class="btn">Import CSV or paste</button>
+          </div>
+        </div>
+
+        <div id="import-staging" class="import-staging" role="dialog" aria-labelledby="import-heading" hidden>
+          <h3 id="import-heading">Review the import</h3>
+          <p id="import-summary" class="import-summary"></p>
+          <ul id="import-details" class="import-details"></ul>
+          <fieldset class="import-modes">
+            <legend>How should it be applied?</legend>
+            <label><input type="radio" name="import-mode" value="replace" checked />
+              Replace the schedule (the file is the whole truth)</label>
+            <label><input type="radio" name="import-mode" value="update" />
+              Update matching IDs only (the file is a change list)</label>
+          </fieldset>
+          <div class="network-actions">
+            <button type="button" id="btn-import-apply" class="btn btn-primary">Apply</button>
+            <button type="button" id="btn-import-cancel" class="btn">Cancel</button>
+          </div>
+        </div>
+
+        <div id="unresolved-bar" class="unresolved-bar" role="alert" hidden>
+          <p id="unresolved-text"></p>
+          <div class="network-actions">
+            <button type="button" id="btn-unresolved-review" class="btn">Review</button>
+            <button type="button" id="btn-unresolved-discard" class="btn btn-danger">Discard them</button>
+          </div>
+        </div>
+      </section>
+
       <section class="panel panel-preview" aria-labelledby="preview-heading">
         <div class="preview-header">
           <h2 id="preview-heading">Drawing preview</h2>

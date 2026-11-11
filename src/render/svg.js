@@ -160,6 +160,68 @@ export function renderSceneToSvg(scene, options = {}) {
     parts.push('</g>');
   }
 
+  // Annotations go last so their leaders and text sit above the drawing. They are
+  // read straight from the scene: no coordinate here is computed, which is what
+  // keeps this output identical to the PDF and the print sheet.
+  if (scene.annotations) {
+    const annots = scene.annotations;
+    if (annots.spans.length) {
+      parts.push(
+        `<g id="span-lengths" font-family="${escapeXml(scene.fontFamily)}" ` +
+          `font-size="${num(scene.config.annotSpanFontSize)}" paint-order="stroke" ` +
+          `stroke="#ffffff" stroke-width="3" stroke-linejoin="round">`,
+      );
+      for (const span of annots.spans) {
+        parts.push(
+          `<text id="${escapeXml(span.id)}" data-span="${escapeXml(span.assetId)}" ` +
+            `x="${num(span.center.x)}" y="${num(span.center.y)}" ` +
+            `text-anchor="middle" dominant-baseline="central" fill="#111">` +
+            `${escapeXml(span.lines.join(' '))}</text>`,
+        );
+      }
+      parts.push('</g>');
+    }
+
+    if (annots.callouts.length) {
+      parts.push(
+        `<g id="load-callouts" font-family="${escapeXml(scene.fontFamily)}" ` +
+          `font-size="${num(scene.config.annotLoadFontSize)}">`,
+      );
+      for (const callout of annots.callouts) {
+        const leader = callout.leader;
+        const arrow = callout.arrow;
+        parts.push(`<g id="${escapeXml(callout.id)}" data-node="${escapeXml(callout.assetId)}">`);
+        // The leader stops at the text block's edge, so it touches the callout
+        // instead of running underneath it.
+        parts.push(
+          `<line class="leader" x1="${num(leader.x1)}" y1="${num(leader.y1)}" ` +
+            `x2="${num(leader.x2)}" y2="${num(leader.y2)}" ` +
+            `stroke="#111" stroke-width="${num(scene.config.annotLeaderWidth)}"/>`,
+        );
+        parts.push(
+          `<polygon class="leader-arrow" ` +
+            `points="${arrow.points.map((pt) => `${num(pt.x)},${num(pt.y)}`).join(' ')}" ` +
+            `fill="#111" stroke="none"/>`,
+        );
+        // One text line per load record, stacked around the callout's centre.
+        // Several loads on one pole share a callout but never merge into a total.
+        const lineHeight = scene.config.annotLineSpacing;
+        const blockHeight = (callout.lines.length - 1) * lineHeight;
+        const firstY = callout.center.y - blockHeight / 2;
+        callout.lines.forEach((text, i) => {
+          parts.push(
+            `<text x="${num(callout.center.x)}" y="${num(firstY + i * lineHeight)}" ` +
+              `text-anchor="middle" dominant-baseline="central" fill="#111" ` +
+              `paint-order="stroke" stroke="#ffffff" stroke-width="3" ` +
+              `stroke-linejoin="round">${escapeXml(text)}</text>`,
+          );
+        });
+        parts.push('</g>');
+      }
+      parts.push('</g>');
+    }
+  }
+
   parts.push('</svg>');
   return parts.join('\n');
 }

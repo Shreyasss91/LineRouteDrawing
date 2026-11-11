@@ -11,6 +11,9 @@
 import { EXAMPLE_ROUTES, createConfig, PAGE_LAYOUTS } from '../config.js';
 import { buildNetwork } from '../geometry/network.js';
 import { buildScene } from '../geometry/scene.js';
+import { createSpanLengths } from '../data/schedules.js';
+import { createNetworkPanel } from './network_panel.js';
+import { buildAssetRegistry, spanAssetId } from '../geometry/assets.js';
 import { checkSpanClearance, requiredSpanLength } from '../geometry/clearance.js';
 import {
   parseProjectJson,
@@ -86,6 +89,34 @@ const dom = {
 };
 
 const state = createState();
+
+/**
+ * The Network Data section.
+ *
+ * It reads the live state through these callbacks rather than holding a second
+ * copy, so the tables, the drawing and the file can never disagree about what has
+ * been recorded.
+ */
+let networkPanel = null;
+
+/** Apply a measured-data change and persist it, without rebuilding the routes. */
+function applyMeasuredChange(patch) {
+  if ('loads' in patch) state.loads = patch.loads;
+  if ('spanLengths' in patch) state.spanLengths = patch.spanLengths;
+  if ('loadPlacements' in patch) state.loadPlacements = patch.loadPlacements;
+  if ('spanPlacements' in patch) state.spanPlacements = patch.spanPlacements;
+  // The drawing depends on the measurements (annotations are drawn from them), so
+  // the preview must be rebuilt; the routes themselves are untouched.
+  recompute();
+  renderPreview();
+  networkPanel?.render();
+  persistProject();
+}
+
+/** Report a result to the user in the existing status line. */
+function notify(message) {
+  dom.exportStatus.textContent = message;
+}
 /** Viewport transform applied to the preview canvas. */
 const view = { zoom: 1, x: 0, y: 0 };
 /** Latest derived model, refreshed on every change. */
@@ -126,12 +157,7 @@ function persistProject() {
   if (recoveryPending) {
     return { ok: false, code: 'RECOVERY_PENDING', message: null, savedAt: null };
   }
-  const result = saveToStorage({
-    routes: state.routes,
-    originMarker: state.originMarker,
-    spanLength: state.spanLength,
-    layout: state.layout,
-  });
+  const result = saveToStorage(authoredProject());
   persistenceNotice = result.ok ? null : result.message;
   renderPersistenceNotice();
   return result;
@@ -176,6 +202,12 @@ function applyProject(project, options = {}) {
   state.originMarker = project.originMarker;
   state.spanLength = project.spanLength;
   state.layout = project.layout;
+  // The measurements come back exactly as saved. A load keeps its record identity
+  // and its node asset id, so an unrelated edit elsewhere cannot move it.
+  state.loads = Array.isArray(project.loads) ? project.loads : [];
+  state.spanLengths = project.spanLengths instanceof Map ? project.spanLengths : createSpanLengths();
+  state.loadPlacements = project.loadPlacements ?? {};
+  state.spanPlacements = project.spanPlacements ?? {};
   state.selectedId = null;
 
   dom.spacing.value = String(state.spanLength);
@@ -314,6 +346,19 @@ function discardUnreadableProject(kind = 'example') {
  * @returns {object} Authored project.
  */
 function currentAuthoredProject() {
+  return authoredProject();
+}
+
+/**
+ * The whole authored project, from the live state.
+ *
+ * One function so saving to storage and saving to a file cannot disagree: the two
+ * used to build their payloads separately, and this feature adds four more keys
+ * that both need.
+ *
+ * @returns {object} Authored project.
+ */
+function authoredProject() {
   return {
     routes: state.routes.map((route) => ({
       id: route.id,
@@ -326,17 +371,26 @@ function currentAuthoredProject() {
     originMarker: state.originMarker,
     spanLength: state.spanLength,
     layout: state.layout,
+    loads: state.loads,
+    spanLengths: state.spanLengths,
+    loadPlacements: state.loadPlacements,
+    spanPlacements: state.spanPlacements,
+  };
+}
+
+/** The measured data, in the shape `buildScene` expects for its fourth argument. */
+function measuredData() {
+  return {
+    loads: state.loads,
+    spanLengths: state.spanLengths,
+    loadPlacements: state.loadPlacements,
+    spanPlacements: state.spanPlacements,
   };
 }
 
 /** Save the project to a downloadable file. */
 function saveProjectFile() {
-  const text = serializeProjectJson({
-    routes: state.routes,
-    originMarker: state.originMarker,
-    spanLength: state.spanLength,
-    layout: state.layout,
-  });
+  const text = serializeProjectJson(authoredProject());
   const blob = new Blob([text], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -399,11 +453,51 @@ async function loadProjectFile(file) {
 /* Derived model                                                       */
 /* ------------------------------------------------------------------ */
 
-/** Rebuild the canonical network and the preview scene from the routes. */
+/**
+ * Rebuild the canonical network and the preview scene from the routes.
+ *
+ * Also builds the lookup tables that link a drawn primitive back to an asset id:
+ * the drawing is keyed by coordinate, the measured data by asset id, and these maps
+ * are the bridge. They are built here, once, rather than re-derived per render.
+ */
 function recompute() {
   const network = buildNetwork(state.routes, { originMarker: state.originMarker });
-  const scene = buildScene(network, 'preview', { spanLength: state.spanLength });
-  current = { network, scene };
+  const scene = buildScene(network, 'preview', { spanLength: state.spanLength }, measuredData());
+  const registry = buildAssetRegistry(network);
+
+  // Scene primitive id -> asset id.
+  const nodeForPole = new Map();
+  const nodePositions = new Map();
+  for (const asset of registry.allNodeAssets()) {
+    nodeForPole.set(`pole:${asset.coordKey}`, asset.id);
+    nodeForPole.set(`fpb:${asset.coordKey}`, asset.id);
+    nodeForPole.set(`tc:${asset.coordKey}`, asset.id);
+  }
+  for (const pole of scene.poles) {
+    const assetId = nodeForPole.get(pole.id);
+    if (assetId) nodePositions.set(assetId, { x: pole.x, y: pole.y });
+  }
+  for (const box of scene.fpb) {
+    const assetId = nodeForPole.get(box.id);
+    if (assetId) nodePositions.set(assetId, { x: box.x, y: box.y });
+  }
+  for (const triangle of scene.tc) {
+    const assetId = nodeForPole.get(triangle.id);
+    if (assetId) nodePositions.set(assetId, { x: triangle.x, y: triangle.y });
+  }
+
+  // A drawn line's parent id -> span asset id. The graph edge key is the pair of
+  // coordinate keys, and the registry resolves that pair to the canonical span.
+  const spanForLine = new Map();
+  for (const edge of network.graph.edges.values()) {
+    const a = registry.canonicalNodeId(edge.a);
+    const b = registry.canonicalNodeId(edge.b);
+    if (!a || !b) continue;
+    const spanId = registry.canonicalSpanId(spanAssetId(a, b));
+    if (spanId) spanForLine.set(`line:${edge.key}`, spanId);
+  }
+
+  current = { network, scene, registry, nodeForPole, nodePositions, spanForLine };
   return current;
 }
 
@@ -441,7 +535,132 @@ function renderPreview() {
   }
   dom.previewEmpty.hidden = true;
   dom.canvas.innerHTML = renderSceneToSvg(scene, { standalone: false });
+  addHitAreas();
+  applyHighlight();
   applyView();
+}
+
+/**
+ * Add invisible click targets over the drawing.
+ *
+ * A transparent circle over each pole and a wide transparent band along each
+ * span make a node or a span selectable by clicking it, which is how a person
+ * points at "that pole". They carry the asset id rather than a coordinate, so the
+ * selection is a selection of the thing itself.
+ */
+function addHitAreas() {
+  const svg = dom.canvas.querySelector('svg');
+  if (!svg) return;
+  const scene = current.scene;
+  const ns = 'http://www.w3.org/2000/svg';
+
+  const group = document.createElementNS(ns, 'g');
+  group.setAttribute('id', 'hit-areas');
+  group.setAttribute('fill', 'transparent');
+  group.style.pointerEvents = 'all';
+
+  // Span bands first, so a pole on top of one wins the click.
+  for (const line of scene.lines) {
+    const span = current.spanForLine?.get(line.parentId);
+    if (!span) continue;
+    const band = document.createElementNS(ns, 'line');
+    band.setAttribute('x1', String(line.x1));
+    band.setAttribute('y1', String(line.y1));
+    band.setAttribute('x2', String(line.x2));
+    band.setAttribute('y2', String(line.y2));
+    band.setAttribute('stroke', 'transparent');
+    band.setAttribute('stroke-width', String(Math.max(8, scene.spanLength * 0.35)));
+    band.setAttribute('stroke-linecap', 'round');
+    band.setAttribute('data-span-hit', span);
+    group.appendChild(band);
+  }
+
+  for (const pole of scene.poles) {
+    const node = current.nodeForPole?.get(pole.id);
+    if (!node) continue;
+    const circle = document.createElementNS(ns, 'circle');
+    circle.setAttribute('cx', String(pole.x));
+    circle.setAttribute('cy', String(pole.y));
+    circle.setAttribute('r', String(Math.max(7, scene.spanLength * 0.28)));
+    circle.setAttribute('data-node-hit', node);
+    group.appendChild(circle);
+  }
+  for (const box of scene.fpb ?? []) {
+    const node = current.nodeForPole?.get(box.id);
+    if (!node) continue;
+    const rect = document.createElementNS(ns, 'rect');
+    rect.setAttribute('x', String(box.boxX - 3));
+    rect.setAttribute('y', String(box.boxY - 3));
+    rect.setAttribute('width', String(box.width + 6));
+    rect.setAttribute('height', String(box.height + 6));
+    rect.setAttribute('data-node-hit', node);
+    group.appendChild(rect);
+  }
+
+  svg.appendChild(group);
+}
+
+/** 'node' or 'span' currently highlighted in the drawing. */
+let highlight = null;
+
+/** Highlight a node asset in the drawing. */
+function highlightNode(nodeId) {
+  highlight = { kind: 'node', id: nodeId };
+  applyHighlight();
+}
+
+/** Highlight a span asset in the drawing. */
+function highlightSpan(spanId) {
+  highlight = { kind: 'span', id: spanId };
+  applyHighlight();
+}
+
+/**
+ * Draw the highlight ring for the current selection.
+ *
+ * Painted as one overlay group replaced on every change, so repeated selections
+ * cannot accumulate rings.
+ */
+function applyHighlight() {
+  const svg = dom.canvas.querySelector('svg');
+  if (!svg) return;
+  svg.querySelector('#selection-highlight')?.remove();
+  if (!highlight) return;
+
+  const ns = 'http://www.w3.org/2000/svg';
+  const group = document.createElementNS(ns, 'g');
+  group.setAttribute('id', 'selection-highlight');
+  group.style.pointerEvents = 'none';
+
+  if (highlight.kind === 'node') {
+    const position = current.nodePositions?.get(highlight.id);
+    if (position) {
+      const ring = document.createElementNS(ns, 'circle');
+      ring.setAttribute('cx', String(position.x));
+      ring.setAttribute('cy', String(position.y));
+      ring.setAttribute('r', String(current.scene.config.poleMarkerSize + 6));
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke', '#1f5fa8');
+      ring.setAttribute('stroke-width', '1.6');
+      ring.setAttribute('stroke-dasharray', '4 3');
+      group.appendChild(ring);
+    }
+  } else {
+    for (const line of current.scene.lines) {
+      if (current.spanForLine?.get(line.parentId) !== highlight.id) continue;
+      const band = document.createElementNS(ns, 'line');
+      band.setAttribute('x1', String(line.x1));
+      band.setAttribute('y1', String(line.y1));
+      band.setAttribute('x2', String(line.x2));
+      band.setAttribute('y2', String(line.y2));
+      band.setAttribute('stroke', '#1f5fa8');
+      band.setAttribute('stroke-width', '4');
+      band.setAttribute('stroke-opacity', '0.4');
+      band.setAttribute('stroke-linecap', 'round');
+      group.appendChild(band);
+    }
+  }
+  svg.appendChild(group);
 }
 
 /** Scale the drawing to fit the stage with a little breathing room. */
@@ -620,6 +839,7 @@ function refresh({ refit = false } = {}) {
   renderErrors();
   renderPreview();
   refreshFromOptions();
+  networkPanel?.render();
   updateOutputButtons();
   if (refit) fitToScreen();
 }
@@ -836,7 +1056,7 @@ function exportPdf() {
     dom.exportStatus.textContent = 'The PDF library did not load. Reload the page and try again.';
     return;
   }
-  const scene = buildScene(current.network, 'pdf', { spanLength: state.spanLength });
+  const scene = buildScene(current.network, 'pdf', { spanLength: state.spanLength }, measuredData());
   const { doc, layout } = renderSceneToPdf(scene, { jsPDF, layout: state.layout });
   doc.save('line-route-drawing.pdf');
   dom.exportStatus.textContent = `PDF downloaded (${layout.label}).`;
@@ -844,7 +1064,7 @@ function exportPdf() {
 
 function exportSvg() {
   if (!requireExportable()) return;
-  const scene = buildScene(current.network, 'svg', { spanLength: state.spanLength });
+  const scene = buildScene(current.network, 'svg', { spanLength: state.spanLength }, measuredData());
   const svg = renderSceneToSvg(scene, { standalone: true, background: '#ffffff' });
   downloadBlob(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), 'line-route-drawing.svg');
   dom.exportStatus.textContent = 'SVG downloaded. Insert it with Insert > Pictures in Word or PowerPoint.';
@@ -852,7 +1072,7 @@ function exportSvg() {
 
 function printDrawing() {
   if (!requireExportable()) return;
-  const scene = buildScene(current.network, 'print', { spanLength: state.spanLength });
+  const scene = buildScene(current.network, 'print', { spanLength: state.spanLength }, measuredData());
   const layout = PAGE_LAYOUTS[state.layout] ?? PAGE_LAYOUTS.a4_landscape;
   const orientation = layout.orientation === 'portrait' ? 'portrait' : 'landscape';
 
@@ -896,6 +1116,22 @@ let panStart = null;
 const EDITING_TAGS = new Set(['INPUT', 'SELECT', 'BUTTON', 'TEXTAREA', 'LABEL']);
 
 function setupPreviewInteraction() {
+  // A click on a pole or a span selects it in the Network Data tables, which is
+  // how a person points at what they mean instead of hunting for an id in a list.
+  dom.canvas.addEventListener('click', (event) => {
+    const node = event.target.getAttribute?.('data-node-hit');
+    const span = event.target.getAttribute?.('data-span-hit');
+    if (node) {
+      highlightNode(node);
+      networkPanel?.selectNode?.(node);
+      return;
+    }
+    if (span) {
+      highlightSpan(span);
+      networkPanel?.selectSpan?.(span);
+    }
+  });
+
   dom.stage.addEventListener('pointerdown', (event) => {
     if (event.target.closest('button, input, select')) return;
     panning = true;
@@ -1007,6 +1243,18 @@ function setupEventListeners() {
 function boot() {
   setupEventListeners();
   setupPreviewInteraction();
+
+  // The Network Data section reads the live state and writes back through
+  // `applyMeasuredChange`, so the tables and the drawing share one source.
+  networkPanel = createNetworkPanel({
+    getState: () => state,
+    getNetwork: () => current.network,
+    onChange: (patch) => applyMeasuredChange(patch),
+    onSelectNode: (nodeId) => highlightNode(nodeId),
+    onSelectSpan: (spanId) => highlightSpan(spanId),
+    notify: (message) => notify(message),
+  });
+
   dom.spacing.value = String(state.spanLength);
   dom.spacing.min = String(REQUIRED_SPACING);
   dom.layout.value = state.layout;

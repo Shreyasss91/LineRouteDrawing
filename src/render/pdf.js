@@ -191,6 +191,67 @@ export function renderSceneToPdf(scene, options) {
     }
   }
 
+  // Annotations: span lengths and load callouts, read straight from the scene so
+  // this sheet states the same loads and lengths as the preview and the SVG. Vector
+  // only - a leader is a stroked line, an arrowhead a filled triangle, and the text
+  // is real text - so nothing here is rasterised.
+  if (scene.annotations) {
+    const annots = scene.annotations;
+
+    if (annots.spans.length) {
+      doc.setFont(scene.fontFamily.split(',')[0].trim(), 'normal');
+      doc.setFontSize(Math.max(3, scene.config.annotSpanFontSize * fit.scale));
+      doc.setTextColor(0, 0, 0);
+      for (const span of annots.spans) {
+        doc.text(span.lines.join(' '), tx(span.center.x), ty(span.center.y), {
+          align: 'center',
+          baseline: 'middle',
+        });
+      }
+    }
+
+    if (annots.callouts.length) {
+      for (const callout of annots.callouts) {
+        const leader = callout.leader;
+        doc.setLineWidth(Math.max(0.15, scene.config.annotLeaderWidth * fit.scale));
+        doc.setDrawColor(0, 0, 0);
+        doc.line(tx(leader.x1), ty(leader.y1), tx(leader.x2), ty(leader.y2));
+
+        const [p0, p1, p2] = callout.arrow.points;
+        if (p0 && p1 && p2) {
+          doc.setFillColor(0, 0, 0);
+          doc.lines(
+            [
+              [p1.x - p0.x, p1.y - p0.y],
+              [p2.x - p1.x, p2.y - p1.y],
+              [p0.x - p2.x, p0.y - p2.y],
+            ],
+            tx(p0.x),
+            ty(p0.y),
+            [1, 1],
+            'F',
+            true,
+          );
+        }
+
+        // One text line per load record. Several loads on one pole share a callout
+        // but are never added together, because their units do not add.
+        doc.setFont(scene.fontFamily.split(',')[0].trim(), 'normal');
+        doc.setFontSize(Math.max(3, scene.config.annotLoadFontSize * fit.scale));
+        doc.setTextColor(0, 0, 0);
+        const lineHeight = scene.config.annotLineSpacing;
+        const blockHeight = (callout.lines.length - 1) * lineHeight;
+        const firstY = callout.center.y - blockHeight / 2;
+        callout.lines.forEach((text, i) => {
+          doc.text(text, tx(callout.center.x), ty(firstY + i * lineHeight), {
+            align: 'center',
+            baseline: 'middle',
+          });
+        });
+      }
+    }
+  }
+
   // Labels only exist for the preview profile; exports carry none.
   if (scene.labels.length) {
     doc.setFont(scene.fontFamily.split(',')[0].trim(), 'normal');
