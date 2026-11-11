@@ -1,0 +1,21 @@
+{
+  "name": "line-route-drawing-generator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline browser tool that turns sequential route instructions into an electrical line-route drawing (SVG/PDF/print).",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "serve": "node scripts/serve.js"
+  },
+  "keywords": [
+    "svg",
+    "pdf",
+    "route-drawing",
+    "geometry"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}
