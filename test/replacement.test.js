@@ -163,6 +163,8 @@ test('13. the comparison ignores nothing the schema stores', () => {
     JSON.parse(serializeProjectJson(withRoutes(), { now: FIXED_DATE })).project,
   );
   assert.deepEqual(payloadKeys.sort(), [
+    'exportLengths',
+    'exportLoads',
     'layout',
     'loadPlacements',
     'loads',
@@ -189,6 +191,8 @@ test('13. the comparison ignores nothing the schema stores', () => {
       loadPlacements: { origin: { dx: 4, dy: 4 } },
       spanPlacements: { 'origin~dst:route-1': { dx: 2, dy: 2 } },
       nodeDesignations: { origin: 'Origin', 'dst:route-1': 'HUB' },
+      exportLoads: false,
+      exportLengths: false,
     };
     b[key] = changed[key];
     assert.equal(sameAuthoredProject(a, b), false, `${key} is compared`);

@@ -293,6 +293,22 @@
             <option value="letter_landscape">Letter landscape</option>
           </select>
         </div>
+        <fieldset class="export-annotations">
+          <legend>Annotation content in exports</legend>
+          <label class="checkbox">
+            <input type="checkbox" id="field-export-loads" checked />
+            Include Node Loads
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="field-export-lengths" checked />
+            Include Span Lengths
+          </label>
+          <p class="hint">
+            These apply to the PDF, the SVG and the printed sheet only. The preview
+            here keeps showing everything you have entered, and switching one off
+            never deletes the data behind it.
+          </p>
+        </fieldset>
         <div class="output-actions">
           <button type="button" id="btn-pdf" class="btn btn-primary">Download PDF</button>
           <button type="button" id="btn-svg" class="btn">Download SVG for Office</button>
@@ -300,7 +316,8 @@
         </div>
         <p class="hint">
           PDF, SVG and print hide the Origin and alphabetical labels. X symbols,
-          route lines, TC triangles and FPB boxes are always drawn.
+          route lines, TC triangles and FPB boxes are always drawn. The
+          measurement-completeness note is a working aid and is never exported.
         </p>
         <p id="export-status" class="export-status" role="status"></p>
       </section>

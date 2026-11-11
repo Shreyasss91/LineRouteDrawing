@@ -59,6 +59,8 @@ test('2. the payload carries only what the user authored', () => {
   const payload = toProjectPayload(sampleProject());
   // Schema version 2 added the measured data; version 3 adds the point names.
   assert.deepEqual(Object.keys(payload).sort(), [
+    'exportLengths',
+    'exportLoads',
     'layout',
     'loadPlacements',
     'loads',
@@ -102,6 +104,8 @@ test('3. serialization is deterministic', () => {
     'loadPlacements',
     'spanPlacements',
     'nodeDesignations',
+    'exportLoads',
+    'exportLengths',
   ]);
 });
 

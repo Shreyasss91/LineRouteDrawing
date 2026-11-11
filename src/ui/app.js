@@ -8,7 +8,7 @@
  * renderer that consumes that same scene.
  */
 
-import { EXAMPLE_ROUTES, createConfig, PAGE_LAYOUTS } from '../config.js';
+import { EXAMPLE_ROUTES, RENDER_PROFILES, createConfig, PAGE_LAYOUTS } from '../config.js';
 import { buildNetwork } from '../geometry/network.js';
 import { buildScene } from '../geometry/scene.js';
 import { createSpanLengths } from '../data/schedules.js';
@@ -95,6 +95,8 @@ const dom = {
   exportStatus: el('export-status'),
   miniPreview: el('mini-preview'),
   openFullPreview: el('btn-open-full-preview'),
+  exportLoads: el('field-export-loads'),
+  exportLengths: el('field-export-lengths'),
 };
 
 const state = createState();
@@ -223,11 +225,16 @@ function applyProject(project, options = {}) {
   // stored, so a reload can never continue from a stale number.
   state.nodeDesignations = project.nodeDesignations instanceof Map ? project.nodeDesignations : new Map();
   state.designationCounters = countersFromDesignations(state.nodeDesignations.values());
+  // A project saved before the switches existed opens with both on, which is what
+  // every such project exported until now.
+  state.exportLoads = project.exportLoads !== false;
+  state.exportLengths = project.exportLengths !== false;
   state.selectedId = null;
 
   dom.spacing.value = String(state.spanLength);
   dom.layout.value = state.layout;
   dom.originMarker.value = state.originMarker;
+  syncExportSwitches();
   clearForm();
   refresh({ refit: options.refit ?? true });
 }
@@ -393,6 +400,8 @@ function authoredProject() {
     // Names are authored: once a pole is called A1 it is stored, and a reload reads
     // it back rather than allocating again.
     nodeDesignations: state.nodeDesignations,
+    exportLoads: state.exportLoads,
+    exportLengths: state.exportLengths,
   };
 }
 
@@ -1173,6 +1182,49 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+/**
+ * The render profile an export uses.
+ *
+ * One function for all three outputs is deliberate. If the PDF and the SVG each
+ * assembled their own profile, a switch added to one and missed in the other would be
+ * invisible until somebody compared two printed sheets - and the two would then claim
+ * to be the same drawing while showing different annotations.
+ *
+ * @param {'pdf'|'svg'|'print'} id Which output is being rendered.
+ * @returns {object} Profile with the two annotation switches applied.
+ */
+function exportProfile(id) {
+  return {
+    ...RENDER_PROFILES[id],
+    showNodeLoads: state.exportLoads,
+    showSpanLengths: state.exportLengths,
+  };
+}
+
+/**
+ * Put the checkboxes back in step with the state.
+ *
+ * Needed on load, because a project carries its own answer and the markup's default
+ * of "checked" would otherwise quietly re-enable something the user had turned off.
+ */
+function syncExportSwitches() {
+  if (dom.exportLoads) dom.exportLoads.checked = state.exportLoads !== false;
+  if (dom.exportLengths) dom.exportLengths.checked = state.exportLengths !== false;
+}
+
+/** Say plainly what the next export will contain. */
+function describeExportSwitches() {
+  if (!dom.exportStatus) return;
+  const loads = state.exportLoads !== false;
+  const lengths = state.exportLengths !== false;
+  let summary;
+  if (loads && lengths) summary = 'Exports will include node loads and span lengths.';
+  else if (loads) summary = 'Exports will include node loads only.';
+  else if (lengths) summary = 'Exports will include span lengths only.';
+  else summary = 'Exports will include neither loads nor span lengths.';
+  dom.exportStatus.textContent = summary;
+}
+
 function exportPdf() {
   if (!requireExportable()) return;
   const jsPDF = window.jspdf && window.jspdf.jsPDF;
@@ -1180,7 +1232,7 @@ function exportPdf() {
     dom.exportStatus.textContent = 'The PDF library did not load. Reload the page and try again.';
     return;
   }
-  const scene = buildScene(current.network, 'pdf', { spanLength: state.spanLength }, measuredData());
+  const scene = buildScene(current.network, exportProfile('pdf'), { spanLength: state.spanLength }, measuredData());
   const { doc, layout } = renderSceneToPdf(scene, { jsPDF, layout: state.layout });
   doc.save('line-route-drawing.pdf');
   dom.exportStatus.textContent = `PDF downloaded (${layout.label}).`;
@@ -1188,7 +1240,7 @@ function exportPdf() {
 
 function exportSvg() {
   if (!requireExportable()) return;
-  const scene = buildScene(current.network, 'svg', { spanLength: state.spanLength }, measuredData());
+  const scene = buildScene(current.network, exportProfile('svg'), { spanLength: state.spanLength }, measuredData());
   const svg = renderSceneToSvg(scene, { standalone: true, background: '#ffffff' });
   downloadBlob(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), 'line-route-drawing.svg');
   dom.exportStatus.textContent = 'SVG downloaded. Insert it with Insert > Pictures in Word or PowerPoint.';
@@ -1196,7 +1248,7 @@ function exportSvg() {
 
 function printDrawing() {
   if (!requireExportable()) return;
-  const scene = buildScene(current.network, 'print', { spanLength: state.spanLength }, measuredData());
+  const scene = buildScene(current.network, exportProfile('print'), { spanLength: state.spanLength }, measuredData());
   const layout = PAGE_LAYOUTS[state.layout] ?? PAGE_LAYOUTS.a4_landscape;
   const orientation = layout.orientation === 'portrait' ? 'portrait' : 'landscape';
 
@@ -1441,6 +1493,22 @@ function setupEventListeners() {
   dom.layout.addEventListener('change', () => {
     state.layout = dom.layout.value;
     updateOutputButtons();
+    persistProject();
+  });
+
+  // The two export switches. They change nothing on screen on purpose: the preview
+  // and the mini-preview keep showing every entered annotation, because the person
+  // filling in the survey should never be looking at a filtered-down drawing while
+  // doing it. Only the next export is affected.
+  dom.exportLoads.addEventListener('change', () => {
+    state.exportLoads = dom.exportLoads.checked;
+    describeExportSwitches();
+    persistProject();
+  });
+
+  dom.exportLengths.addEventListener('change', () => {
+    state.exportLengths = dom.exportLengths.checked;
+    describeExportSwitches();
     persistProject();
   });
 

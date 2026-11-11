@@ -150,6 +150,15 @@ export function buildAnnotationLayer(input) {
   const obstacles = [...lineBoxes, ...markerBoxes];
   const taken = [];
 
+  // Export visibility is decided HERE, once, from the profile - not inside a renderer.
+  // Both the SVG and the PDF draw whatever this layer hands them, so a switch applied
+  // at this single point cannot drift between the two formats. Nothing is deleted: the
+  // measured data and the placements stay exactly as they were, and only the records
+  // this particular output is allowed to show are built. The preview profile keeps
+  // both flags true, so the working view always shows everything entered.
+  const showNodeLoads = profile.showNodeLoads !== false;
+  const showSpanLengths = profile.showSpanLengths !== false;
+
   // ---- Callouts: group every load on a node into one box ----
   const byNode = new Map();
   for (const load of loads) {
@@ -158,6 +167,7 @@ export function buildAnnotationLayer(input) {
   }
 
   for (const [nodeId, nodeLoads] of byNode) {
+    if (!showNodeLoads) break;
     const node = nodeById.get(nodeId);
     if (!node) continue;
     const position = nodePixel.get(nodeId);
@@ -219,6 +229,7 @@ export function buildAnnotationLayer(input) {
   // looks finished while a measurement is missing, and nobody reading the sheet
   // can tell the difference between "not surveyed" and "no span here".
   for (const asset of spanAssets) {
+    if (!showSpanLengths) break;
     const a = nodeById.get(asset.a);
     const b = nodeById.get(asset.b);
     const pa = nodePixel.get(asset.a);
@@ -274,8 +285,12 @@ export function buildAnnotationLayer(input) {
     totalSpans > 0
       ? { total: totalSpans, measured: measuredCount, unmeasured: totalSpans - measuredCount }
       : { total: 0, measured: 0, unmeasured: 0 };
+  // The notice is an application status message, not a mark that belongs on a
+  // technical sheet, so an export profile turns it off entirely - text and box both.
+  // The completeness numbers are still computed above, because the schedule headers
+  // and the browser summary report them regardless of which profile is rendering.
   let notice = null;
-  if (completeness.unmeasured > 0) {
+  if (profile.showCompleteNotice !== false && completeness.unmeasured > 0) {
     const text = `Span measurements incomplete: ${completeness.unmeasured} of ${completeness.total} spans unmeasured.`;
     const size = measureBlock([text], config, config.annotSpanFontSize);
     // Bottom-left of the drawing frame, inside the padding, where a route drawing

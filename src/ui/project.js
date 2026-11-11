@@ -113,6 +113,10 @@ function authoredSignature(project) {
     // A name is authored data, so opening a file that renames poles is a change worth
     // asking about rather than something to apply quietly.
     nodeDesignations: normalizeDesignations(project.nodeDesignations),
+    // A different export choice changes what the sheet shows, so it counts as a change
+    // to the project rather than as a viewer preference.
+    exportLoads: project.exportLoads !== false,
+    exportLengths: project.exportLengths !== false,
   });
 }
 
@@ -158,6 +162,10 @@ export function toProjectPayload(project) {
     // Designations are authored names, so they are saved verbatim. Saving them is
     // what stops a reload from re-deriving its way to different ones.
     nodeDesignations: normalizeDesignations(project.nodeDesignations),
+    // Export visibility is a property of the project, not of this browser session, so
+    // a colleague who opens the file exports the same sheet the author intended.
+    exportLoads: project.exportLoads !== false,
+    exportLengths: project.exportLengths !== false,
   };
 }
 
@@ -486,6 +494,10 @@ export function parseProjectDocument(document) {
       // map, and the allocator named every pole afresh on each reload - which is
       // exactly the defect this line fixes.
       nodeDesignations: measured.nodeDesignations,
+      // A file from before the switches opens with both on, which is what it would
+      // have exported then.
+      exportLoads: payload.exportLoads !== false,
+      exportLengths: payload.exportLengths !== false,
     },
     { warnings: [...warnings, ...measured.warnings] },
   );

@@ -105,6 +105,16 @@ export function createState(exampleRoutes = []) {
      */
     nodeDesignations: new Map(),
     designationCounters: new Map(),
+    /**
+     * Which annotation kinds the exported PDF, SVG and print may carry.
+     *
+     * Separate from the measured data itself: turning loads off must not delete a
+     * single load record, so this is a presentation switch, not a filter applied to
+     * the schedules. Both default to on for a new project, matching the expectation
+     * that a drawing exports what it shows.
+     */
+    exportLoads: true,
+    exportLengths: true,
   };
 }
 

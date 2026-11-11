@@ -39,6 +39,12 @@ export const RENDER_PROFILES = Object.freeze({
     showFpbMarkers: true,
     showJunctionMarkers: false,
     showAnnotations: true,
+    // The browser preview is the working view: it shows the completeness notice and
+    // both annotation kinds, whatever the export switches say, so a survey is never
+    // hidden from the person entering it.
+    showCompleteNotice: true,
+    showNodeLoads: true,
+    showSpanLengths: true,
   }),
   pdf: Object.freeze({
     id: 'pdf',
@@ -50,6 +56,11 @@ export const RENDER_PROFILES = Object.freeze({
     showFpbMarkers: true,
     showJunctionMarkers: false,
     showAnnotations: true,
+    // The completeness notice is an application status message, not part of the
+    // technical drawing, so no exported sheet carries it or its box.
+    showCompleteNotice: false,
+    showNodeLoads: true,
+    showSpanLengths: true,
   }),
   svg: Object.freeze({
     id: 'svg',
@@ -61,6 +72,9 @@ export const RENDER_PROFILES = Object.freeze({
     showFpbMarkers: true,
     showJunctionMarkers: false,
     showAnnotations: true,
+    showCompleteNotice: false,
+    showNodeLoads: true,
+    showSpanLengths: true,
   }),
   print: Object.freeze({
     id: 'print',
@@ -72,6 +86,9 @@ export const RENDER_PROFILES = Object.freeze({
     showFpbMarkers: true,
     showJunctionMarkers: false,
     showAnnotations: true,
+    showCompleteNotice: false,
+    showNodeLoads: true,
+    showSpanLengths: true,
   }),
 });
 
