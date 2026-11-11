@@ -11,3 +11,6 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Temporary files and the scratchpad folder.
+temp/
