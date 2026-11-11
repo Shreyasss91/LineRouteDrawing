@@ -21,6 +21,7 @@ import {
   toProjectPayload,
 } from '../src/ui/project.js';
 import { buildNetwork } from '../src/geometry/network.js';
+import { allocateDesignations } from '../src/geometry/designations.js';
 
 const FIXED_DATE = new Date('2026-03-04T05:06:07.000Z');
 
@@ -76,19 +77,46 @@ function v2Project() {
   };
 }
 
-test('1. the current schema is version 2', () => {
-  assert.equal(PROJECT_SCHEMA_VERSION, 2);
-  assert.deepEqual(SUPPORTED_SCHEMA_VERSIONS, [1, 2]);
+test('1. the current schema is version 3', () => {
+  assert.equal(PROJECT_SCHEMA_VERSION, 3);
+  assert.deepEqual(SUPPORTED_SCHEMA_VERSIONS, [1, 2, 3]);
 });
 
 test('2. a version 1 document migrates with empty measured data', () => {
   const migrated = migrateDocument(v1Document());
-  assert.equal(migrated.warnings.length, 1, 'the reader is told what happened');
+  // Two steps now: v1 -> v2 adds the measured data, v2 -> v3 adds the point names.
+  assert.equal(migrated.warnings.length, 2, 'the reader is told what happened at each step');
   assert.match(migrated.warnings[0], /before loads/);
+  assert.match(migrated.warnings[1], /before points were named/);
   assert.deepEqual(migrated.project.loads, []);
   assert.deepEqual(migrated.project.spanLengths, {});
   assert.deepEqual(migrated.project.loadPlacements, {});
   assert.deepEqual(migrated.project.spanPlacements, {});
+  assert.deepEqual(migrated.project.nodeDesignations, {});
+});
+
+test('2b. a version 2 document gains an empty name table, not generated names', () => {
+  // Names are authored data assigned once. A migration that invented them would give
+  // every pole a name the user never agreed to, so the table starts empty and the
+  // normal allocation fills it on first open.
+  const document = {
+    format: 'line-route-drawing-project',
+    schemaVersion: 2,
+    project: {
+      routes: [{ id: 'route-1', from: 'origin', direction: 'south', spans: 1, tc: false, fpb: false }],
+      originMarker: 'plain',
+      spanLength: 40,
+      layout: 'a4_landscape',
+      loads: [],
+      spanLengths: {},
+      loadPlacements: {},
+      spanPlacements: {},
+    },
+  };
+  const migrated = migrateDocument(document);
+  assert.deepEqual(migrated.project.nodeDesignations, {});
+  assert.equal(migrated.warnings.length, 1);
+  assert.match(migrated.warnings[0], /before points were named/);
 });
 
 test('3. a migration never invents lengths from the drawing spacing', () => {
@@ -107,7 +135,7 @@ test('4. a migration leaves the routes and settings exactly as they were', () =>
 
 test('5. a current document passes through the migration intact', () => {
   const document = savedDoc();
-  assert.equal(document.schemaVersion, 2);
+  assert.equal(document.schemaVersion, 3);
   const migrated = migrateDocument(document);
   assert.deepEqual(migrated.project, document.project);
   assert.deepEqual(migrated.warnings, []);
@@ -200,11 +228,11 @@ test('14. malformed measured data refuses the whole file', () => {
   assert.match(parsed.message, /load list/);
 });
 
-test('15. an opened version 1 project re-saves as version 2 with empty schedules', () => {
+test('15. an opened version 1 project re-saves at the current version with empty schedules', () => {
   const opened = parseProjectDocument(v1Document());
   assert.equal(opened.ok, true);
   const resaved = savedDoc({ ...opened.project });
-  assert.equal(resaved.schemaVersion, 2, 'it is now written at the current version');
+  assert.equal(resaved.schemaVersion, PROJECT_SCHEMA_VERSION, 'it is now written at the current version');
   assert.deepEqual(resaved.project.loads, []);
   assert.deepEqual(resaved.project.spanLengths, {});
   assert.deepEqual(resaved.project.routes, v1Document().project.routes, 'the drawing is unchanged');
@@ -237,4 +265,35 @@ test('18. a placement offset does not move the drawing itself', () => {
   const payload = toProjectPayload(moved);
   assert.deepEqual(payload.routes, toProjectPayload(v2Project()).routes);
   assert.equal(payload.spanLength, 40, 'the drawing spacing is untouched');
+});
+
+test('17. a saved designation table round-trips through parse without loss or renaming', () => {
+  // The bug this pins: the parse path validated nodeDesignations but forgot to hand
+  // them back to the caller, so applyProject saw `undefined`, started from an empty
+  // map, and the allocator re-derived every name on each reload. The saved table
+  // had 67 entries; the app would open with freshly allocated ones.
+  const routes = [
+    { id: 'route-1', from: 'origin', direction: 'south', spans: 3, tc: false, fpb: false },
+    { id: 'route-2', from: 'endpoint:A', direction: 'east', spans: 4, tc: false, fpb: false },
+  ];
+  const network = buildNetwork(routes, { originMarker: 'plain' });
+  const allocation = allocateDesignations(network, {});
+  const project = {
+    routes,
+    originMarker: 'plain',
+    spanLength: 40,
+    layout: 'a4_landscape',
+    loads: [],
+    spanLengths: new Map(),
+    loadPlacements: {},
+    spanPlacements: {},
+    nodeDesignations: allocation.nodeDesignations,
+  };
+  const document = serializeProject(project, { now: FIXED_DATE });
+  const parsed = parseProjectDocument(document);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.project.nodeDesignations.size, allocation.nodeDesignations.size);
+  for (const [id, name] of allocation.nodeDesignations) {
+    assert.equal(parsed.project.nodeDesignations.get(id), name, `node ${id} keeps ${name}`);
+  }
 });

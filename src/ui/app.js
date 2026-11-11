@@ -14,7 +14,7 @@ import { buildScene } from '../geometry/scene.js';
 import { createSpanLengths } from '../data/schedules.js';
 import { createNetworkPanel } from './network_panel.js';
 import { buildAssetRegistry, spanAssetId } from '../geometry/assets.js';
-import { allocateDesignations } from '../geometry/designations.js';
+import { allocateDesignations, countersFromDesignations } from '../geometry/designations.js';
 import {
   buildDesignationOverlay,
   buildSelectionRing,
@@ -217,6 +217,12 @@ function applyProject(project, options = {}) {
   state.spanLengths = project.spanLengths instanceof Map ? project.spanLengths : createSpanLengths();
   state.loadPlacements = project.loadPlacements ?? {};
   state.spanPlacements = project.spanPlacements ?? {};
+  // Point names come back exactly as saved. A project that carries none - anything
+  // written before names existed - starts empty here, and the normal allocation fills
+  // them in on the first rebuild. Counters are rebuilt from the names rather than
+  // stored, so a reload can never continue from a stale number.
+  state.nodeDesignations = project.nodeDesignations instanceof Map ? project.nodeDesignations : new Map();
+  state.designationCounters = countersFromDesignations(state.nodeDesignations.values());
   state.selectedId = null;
 
   dom.spacing.value = String(state.spanLength);
@@ -384,6 +390,9 @@ function authoredProject() {
     spanLengths: state.spanLengths,
     loadPlacements: state.loadPlacements,
     spanPlacements: state.spanPlacements,
+    // Names are authored: once a pole is called A1 it is stored, and a reload reads
+    // it back rather than allocating again.
+    nodeDesignations: state.nodeDesignations,
   };
 }
 

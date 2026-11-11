@@ -166,6 +166,7 @@ test('13. the comparison ignores nothing the schema stores', () => {
     'layout',
     'loadPlacements',
     'loads',
+    'nodeDesignations',
     'originMarker',
     'routes',
     'spanLength',
@@ -187,6 +188,7 @@ test('13. the comparison ignores nothing the schema stores', () => {
       spanLengths: { 'origin~dst:route-1': 30 },
       loadPlacements: { origin: { dx: 4, dy: 4 } },
       spanPlacements: { 'origin~dst:route-1': { dx: 2, dy: 2 } },
+      nodeDesignations: { origin: 'Origin', 'dst:route-1': 'HUB' },
     };
     b[key] = changed[key];
     assert.equal(sameAuthoredProject(a, b), false, `${key} is compared`);

@@ -27,10 +27,10 @@ export const PROJECT_FORMAT = 'line-route-drawing-project';
  * records, the span length measurements and the annotation placements. Version 1
  * documents still open - see `migrateDocument`.
  */
-export const PROJECT_SCHEMA_VERSION = 2;
+export const PROJECT_SCHEMA_VERSION = 3;
 
 /** Every schema version this build can read. */
-export const SUPPORTED_SCHEMA_VERSIONS = Object.freeze([1, 2]);
+export const SUPPORTED_SCHEMA_VERSIONS = Object.freeze([1, 2, 3]);
 
 /** The only marker kinds a route destination may carry. */
 const VALID_DIRECTIONS = new Set(Object.keys(DIRECTIONS));
@@ -110,6 +110,9 @@ function authoredSignature(project) {
     spanLengths,
     loadPlacements: normalizePlacements(project.loadPlacements),
     spanPlacements: normalizePlacements(project.spanPlacements),
+    // A name is authored data, so opening a file that renames poles is a change worth
+    // asking about rather than something to apply quietly.
+    nodeDesignations: normalizeDesignations(project.nodeDesignations),
   });
 }
 
@@ -152,7 +155,34 @@ export function toProjectPayload(project) {
     // pole rather than staying at a screen position.
     loadPlacements: normalizePlacements(project.loadPlacements),
     spanPlacements: normalizePlacements(project.spanPlacements),
+    // Designations are authored names, so they are saved verbatim. Saving them is
+    // what stops a reload from re-deriving its way to different ones.
+    nodeDesignations: normalizeDesignations(project.nodeDesignations),
   };
+}
+
+/**
+ * The node designation table, with only usable names kept.
+ *
+ * Keyed by node asset id, so a designation follows the pole it names rather than the
+ * position it happens to sit at. An empty or malformed entry is dropped rather than
+ * written as null, which would read as "this pole has no name" and invite a fresh one
+ * to be invented on load.
+ *
+ * @param {object|Map<string, string>} designations Designations.
+ * @returns {object} Plain object of `{id: name}`, sorted for a stable file.
+ */
+function normalizeDesignations(designations) {
+  const out = {};
+  const entries =
+    designations instanceof Map ? [...designations.entries()] : Object.entries(designations ?? {});
+  for (const [id, name] of entries.sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    if (typeof name !== 'string') continue;
+    const trimmed = name.trim();
+    if (trimmed.length === 0) continue;
+    out[String(id)] = trimmed;
+  }
+  return out;
 }
 
 /**
@@ -450,6 +480,12 @@ export function parseProjectDocument(document) {
       spanLengths: measured.spanLengths,
       loadPlacements: measured.loadPlacements,
       spanPlacements: measured.spanPlacements,
+      // The name table rides with the measured sections because it is read and
+      // validated in the same pass. It MUST be carried into the project the caller
+      // receives: without it `applyProject` saw `undefined`, started from an empty
+      // map, and the allocator named every pole afresh on each reload - which is
+      // exactly the defect this line fixes.
+      nodeDesignations: measured.nodeDesignations,
     },
     { warnings: [...warnings, ...measured.warnings] },
   );
@@ -546,6 +582,58 @@ function validateMeasuredData(payload, network, problems) {
   if (!loadPlacements.ok) return loadPlacements;
   if (!spanPlacements.ok) return spanPlacements;
 
+  // ---- point designations ----
+  // Kept exactly as saved: a name is what the user agreed with, so a file that
+  // carries one is honoured rather than re-derived. A designation on a pole the
+  // drawing no longer has is kept too, so it can be reported alongside the load that
+  // went with it instead of disappearing quietly.
+  const rawDesignations = payload.nodeDesignations;
+  if (
+    rawDesignations !== undefined &&
+    (typeof rawDesignations !== 'object' || rawDesignations === null || Array.isArray(rawDesignations))
+  ) {
+    return {
+      ok: false,
+      code: 'BAD_DESIGNATIONS',
+      message: 'That project has a point name table that is not a table.',
+    };
+  }
+  const nodeDesignations = new Map();
+  for (const [nodeId, rawName] of Object.entries(rawDesignations ?? {})) {
+    if (typeof rawName !== 'string') continue;
+    const name = rawName.trim();
+    if (name === '') continue;
+    nodeDesignations.set(String(nodeId), name);
+  }
+
+  // Two DIFFERENT points must not share a name, because that is exactly what makes a
+  // schedule ambiguous. But one physical pole legitimately carries one name under two
+  // ids: a named endpoint that is also some route's destination is stored both as
+  // `endpoint:A` and as `dst:route-N`, and the allocator deliberately writes the same
+  // designation to both so neither looks nameless. Refusing that outright would make
+  // every project with an A/B/C endpoint unopenable, which is what happened when this
+  // check was first written.
+  //
+  // So ownership is compared by the coordinate the id resolves to, not by the id
+  // alone. Ids that resolve nowhere (an unresolved asset kept from an older drawing)
+  // are treated as their own point, because there is no evidence they share one.
+  const ownerOfName = new Map();
+  for (const [nodeId, name] of nodeDesignations) {
+    const coord = coordinateForNodeId(network, nodeId);
+    const owner = coord ?? nodeId;
+    const existing = ownerOfName.get(name);
+    if (existing !== undefined && existing !== owner) {
+      return {
+        ok: false,
+        code: 'DUPLICATE_DESIGNATION',
+        message:
+          `That project names two different points ${name}. Each point needs its own ` +
+          'name. Open it and rename one of them.',
+      };
+    }
+    ownerOfName.set(name, owner);
+  }
+
   // ---- referential checks, reported but not fatal ----
   const { buildAssetRegistry } = assetModule;
   const registry = buildAssetRegistry(network);
@@ -575,6 +663,7 @@ function validateMeasuredData(payload, network, problems) {
     spanLengths,
     loadPlacements: loadPlacements.placements,
     spanPlacements: spanPlacements.placements,
+    nodeDesignations,
     warnings,
   };
 }
@@ -628,8 +717,48 @@ export function migrateDocument(document) {
   if (document.schemaVersion === 1 && PROJECT_SCHEMA_VERSION >= 2) {
     payload = upgradeV1ToV2(payload, warnings);
   }
+  if (document.schemaVersion <= 2 && PROJECT_SCHEMA_VERSION >= 3) {
+    payload = upgradeV2ToV3(payload, warnings);
+  }
 
   return { project: payload, warnings };
+}
+
+/**
+ * Version 2 to 3: introduce the network point designations.
+ *
+ * Version 2 named its points only by internal id (`mid:route-2:0`) and by the drawn
+ * label (a letter, or nothing at all for an intermediate pole). Version 3 stores a
+ * designation per node, so a schedule can say `A1` and mean one specific pole.
+ *
+ * A version 2 project opens with an EMPTY designation table rather than one filled
+ * in from the drawing. That is deliberate: the designations are authored data, and
+ * the rule for them is that they are assigned once and never silently reassigned.
+ * Generating them during a migration would hand every pole a name the user never saw
+ * and cannot tell apart from one they chose - and if their route list had changed
+ * since, the generated names would be attached to different poles than a fresh
+ * allocation would produce. So the numbers are allocated on first open by the normal
+ * path, from the saved routes, and from then on they are stored and kept. The drawing
+ * itself is untouched either way.
+ *
+ * The counters are deliberately not stored either. They are derived from the
+ * designations that do exist, so an old project cannot bring a stale counter that
+ * would skip numbers.
+ *
+ * @param {object} payload Version 2 project payload.
+ * @param {string[]} warnings Collected notices.
+ * @returns {object} Version 3 payload.
+ */
+function upgradeV2ToV3(payload, warnings) {
+  if (!payload || typeof payload !== 'object') return payload;
+  warnings.push(
+    'This project was saved before points were named, so its poles are named for ' +
+      'the first time now. The names are stored from here on and will not change.',
+  );
+  return {
+    ...payload,
+    nodeDesignations: {},
+  };
 }
 
 /**
@@ -673,4 +802,41 @@ function upgradeV1ToV2(payload, warnings) {
  */
 export function projectFileName() {
   return 'line-route-project.json';
+}
+
+/**
+ * The coordinate a node asset id stands for, when the network can say.
+ *
+ * Needed because one physical pole is stored under two ids - a named endpoint as
+ * `endpoint:A`, and its far-end pole as `dst:route-N` - and those two ids must be
+ * recognised as the same point when checking that no two DIFFERENT points share a
+ * designation. Anything the network cannot place (an asset kept from a drawing that
+ * has since lost it) returns null, and the caller then treats its id as the point
+ * itself rather than guessing it matches something else.
+ *
+ * @param {object} network Built network.
+ * @param {string} nodeId Node asset id.
+ * @returns {string|null} `x,y`, or null when it cannot be resolved.
+ */
+function coordinateForNodeId(network, nodeId) {
+  if (typeof nodeId !== 'string' || nodeId === '') return null;
+  if (nodeId === 'origin') {
+    const origin = network.originPosition ?? network.origin;
+    if (!origin) return null;
+    return `${origin.x},${origin.y}`;
+  }
+  const endpoint = (network.endpoints ?? []).find((e) => e.id === nodeId);
+  if (endpoint?.position) return `${endpoint.position.x},${endpoint.position.y}`;
+
+  // `mid:<routeId>:<k>` and `dst:<routeId>`. The route id may itself contain a
+  // colon-free run of digits, so the trailing group is matched from the right.
+  const match = /^(mid|dst):(.+?)(?::(\d+))?$/.exec(nodeId);
+  if (!match) return null;
+  const route = (network.routes ?? []).find((r) => r.routeId === match[2]);
+  if (!route || !route.ok || !Array.isArray(route.path)) return null;
+  // A route's path starts at its source, so the k-th intermediate pole is the point
+  // at k+1 and a destination is the last point.
+  const index = match[1] === 'dst' || match[3] === undefined ? route.path.length - 1 : Number(match[3]) + 1;
+  const point = route.path[index];
+  return point ? `${point.x},${point.y}` : null;
 }
