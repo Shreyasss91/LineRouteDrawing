@@ -12,6 +12,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as networkModule from '../src/geometry/network.js';
 
 import { buildNetwork } from '../src/geometry/network.js';
 import { buildAssetRegistry } from '../src/geometry/assets.js';
@@ -303,4 +304,54 @@ test('a named point is not mistaken for a pole', () => {
   assert.equal(isPoleDesignation('A', ['A', 'B']), false);
   assert.equal(isPoleDesignation('Origin', ['Origin']), false);
   assert.equal(isPoleDesignation('Origin:1', ['Origin']), true);
+});
+
+test('a designation of a deleted pole is reserved, never reissued', () => {
+  // Deleting a branch removes its poles from the drawing but must not free their
+  // names. If A1-A4 came back for a different set of poles a reader comparing the old
+  // and new sheets would have no way to tell they were different poles, and a load
+  // record quoting "A2" would silently point somewhere else.
+  const { buildNetwork: build } = networkModule;
+  const first = build(
+    [
+      { id: 'route-1', from: 'origin', direction: 'south', spans: 2 },
+      { id: 'route-2', from: 'endpoint:A', direction: 'east', spans: 5 },
+    ],
+    { originMarker: 'plain' },
+  );
+  const allocated = allocateDesignations(first, {});
+  const poleNames = [...allocated.nodeDesignations.values()].filter((n) => /^A\d+$/.test(n));
+  assert.equal(poleNames.length, 4, 'four A poles were named');
+
+  // The branch is deleted. The saved table keeps its entries, which is what the
+  // application does: `state.nodeDesignations` is only ever extended, never pruned.
+  const kept = new Map(allocated.nodeDesignations);
+
+  // A different branch from the same source is added.
+  const second = build(
+    [
+      { id: 'route-1', from: 'origin', direction: 'south', spans: 2 },
+      { id: 'route-5', from: 'endpoint:A', direction: 'north', spans: 5 },
+    ],
+    { originMarker: 'plain' },
+  );
+  const next = allocateDesignations(second, {
+    nodeDesignations: kept,
+    counters: countersFromDesignations(kept.values()),
+  });
+  const newPoles = [...next.nodeDesignations.entries()]
+    .filter(([id]) => id.startsWith('mid:route-5'))
+    .map(([, name]) => name)
+    .sort();
+  // The point: no new pole takes a name that a deleted pole already had. How many
+  // poles the new branch creates depends on where it overlaps the old one, so the
+  // count is not asserted - the reservation is.
+  const reserved = poleNames.map((name) => name);
+  const clashes = newPoles.filter((name) => reserved.includes(name));
+  assert.deepEqual(clashes, [], 'no deleted pole name is reissued');
+  assert.ok(newPoles.length > 0, 'the new branch did name at least one pole');
+  for (const name of newPoles) {
+    const ordinal = Number(name.slice(1));
+    assert.ok(ordinal > 4, `${name} continues past the reserved A1-A4`);
+  }
 });
