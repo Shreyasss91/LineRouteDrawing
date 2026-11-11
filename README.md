@@ -244,7 +244,8 @@ src/render/pdf.js       scene to vector PDF (jsPDF operations)
 src/ui/                 state, example resolution and the DOM controller
 vendor/jspdf/           jsPDF 4.2.1, MIT, vendored locally
 scripts/serve.js        loopback static server
-scripts/verify-browser.mjs  Playwright workflow check (development aid)
+scripts/test-browser.mjs    committed browser suite (npm run test:browser)
+scripts/verify-browser.mjs  older ad-hoc Playwright probe
 test/                   automated tests
 ```
 
@@ -274,9 +275,31 @@ CRLF, a repeated id, an unknown asset), the version 1 to version 2 migration,
 annotation placement and its collision avoidance, and reconciliation after a
 topology change.
 
-The browser workflow (preview, editing, all three outputs) is checked with
-`scripts/verify-browser.mjs`, which needs Playwright available at run time. It
-is a development aid and is not part of the application.
+### Browser suite
+
+```sh
+npm run test:browser
+```
+
+`scripts/test-browser.mjs` drives the real application in a real browser and
+asserts on what a user would actually see and download: the point designations
+before and after a reload, branch numbering, span ids, the load callouts, the
+incompleteness notice, dragging an annotation and reloading, the CSV import being
+staged rather than applied, all four export switch combinations, and the content
+of the downloaded SVG and PDF.
+
+It needs two things that the application itself does not:
+
+- **Node 20 or newer.**
+- **Playwright**, installed once: `npm install --no-save playwright`. The suite uses
+  the installed Google Chrome through `channel: 'chrome'`, so no browser download is
+  needed. Set `BROWSER_CHANNEL=chromium` to use a Playwright-managed browser instead,
+  `HEADED=1` to watch it run, or `PLAYWRIGHT_PATH` to point at an installation kept
+  outside this project.
+
+The harness starts its own static server on a free port, clears browser storage
+before each scenario, and exits non-zero if any check fails. It is a development
+aid; the application itself never depends on Playwright.
 
 ## Dependencies and licenses
 
@@ -294,7 +317,9 @@ only browser and Node built-ins.
   Office may convert imported graphics into a group of shapes, which is normal
   for SVG import and is not claimed to be shape-by-route editable.
 - The drawing's own labels are suppressed entirely in exports rather than moved
-  off-canvas. Load callouts and span lengths are content, not labels, and are kept.
+  off-canvas. Load callouts and span lengths are content, not labels, and are kept,
+  subject to the two export switches. The measurement-completeness notice is a
+  working aid and is never exported.
 - A load cannot be attached to a TC point; the model refuses it rather than drawing
   a number next to a symbol that has nowhere to put a load.
 - Moving a load to a different point, or resolving an unresolved record, is done from

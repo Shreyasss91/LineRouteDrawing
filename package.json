@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
+    "test:browser": "node scripts/test-browser.mjs",
     "serve": "node scripts/serve.js"
   },
   "keywords": [
@@ -17,5 +18,8 @@
   "license": "MIT",
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
   }
 }
