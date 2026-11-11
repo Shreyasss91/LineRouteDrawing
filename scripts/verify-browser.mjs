@@ -47,7 +47,9 @@ record('example loads 9 route rows', rowCount === 9, `rows=${rowCount}`);
 const svgInfo = await page.evaluate(() => {
   const svg = document.querySelector('#preview-canvas svg');
   return {
-    lines: svg.querySelectorAll('#route-lines line').length,
+    lines: new Set(
+      [...svg.querySelectorAll('#route-lines line')].map((el) => el.getAttribute('data-edge')),
+    ).size,
     poles: svg.querySelectorAll('#pole-markers path').length,
     tc: svg.querySelectorAll('#tc-markers polygon').length,
     texts: [...svg.querySelectorAll('#labels text')].map((t) => t.textContent),
@@ -252,7 +254,10 @@ const widthAt60 = await page.evaluate(() => Number(/width="([\d.]+)"/.exec(docum
 record('span spacing scales the drawing uniformly', widthAt60 > widthAt40, `${widthAt40} -> ${widthAt60}`);
 const topologySame = await page.evaluate(() => {
   const svg = document.querySelector('#preview-canvas svg');
-  return { lines: svg.querySelectorAll('#route-lines line').length, poles: svg.querySelectorAll('#pole-markers path').length };
+  const edges = new Set(
+    [...svg.querySelectorAll('#route-lines line')].map((el) => el.getAttribute('data-edge')),
+  );
+  return { lines: edges.size, poles: svg.querySelectorAll('#pole-markers path').length };
 });
 record('span spacing does not change topology', topologySame.lines === 33 && topologySame.poles === 33, JSON.stringify(topologySame));
 
@@ -334,6 +339,53 @@ const tcSize = await page.evaluate(() => {
     gapBelow: below ? +((below.y - below.half) - baseY).toFixed(1) : null,
   };
 });
+const tcInterior = await page.evaluate(() => {
+  const svg = document.querySelector('#preview-canvas svg');
+  const pts = svg
+    .querySelector('#tc-markers polygon')
+    .getAttribute('points')
+    .trim()
+    .split(/\s+/)
+    .map((pair) => pair.split(',').map(Number));
+  const apex = pts[0][1];
+  const base = pts[1][1];
+  const cx = pts[0][0];
+  const halfWidth = Math.abs(pts[1][0] - cx);
+  const lines = [...svg.querySelectorAll('line')].map((el) => ({
+    x1: Number(el.getAttribute('x1')),
+    y1: Number(el.getAttribute('y1')),
+    x2: Number(el.getAttribute('x2')),
+    y2: Number(el.getAttribute('y2')),
+  }));
+  // The outline belongs to the symbol; only the interior must stay empty.
+  const inside = (x, y) => {
+    const yn = (y - apex) / (base - apex);
+    if (yn <= 0.001 || yn >= 0.999) return false;
+    return Math.abs(x - cx) < halfWidth * (1 - yn) - 0.001;
+  };
+  let hits = 0;
+  for (const line of lines) {
+    for (let step = 0; step <= 40; step += 1) {
+      const t = step / 40;
+      const x = line.x1 + (line.x2 - line.x1) * t;
+      const y = line.y1 + (line.y2 - line.y1) * t;
+      if (inside(x, y)) hits += 1;
+    }
+  }
+  const meetsApex = lines.some((line) => Math.abs(line.y1 - apex) < 1e-6 || Math.abs(line.y2 - apex) < 1e-6);
+  return { hits, meetsApex, lines: lines.length };
+});
+record(
+  'no route line is drawn inside the TC triangle',
+  tcInterior.hits === 0,
+  JSON.stringify(tcInterior),
+);
+record(
+  'the trimmed line still meets the TC triangle',
+  tcInterior.meetsApex === true,
+  `a line ends on the apex: ${tcInterior.meetsApex}`,
+);
+
 record(
   'the TC triangle is drawn at the doubled size without reaching a pole',
   tcSize.height === 20 && tcSize.width === 24 && tcSize.gapAbove > 0 && tcSize.gapBelow > 0,

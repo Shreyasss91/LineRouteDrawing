@@ -46,7 +46,9 @@ Any static file server works equally well. There is nothing to compile.
   new branch is named in the drawing the moment it is added. A label never moves
   when an endpoint is reused.
 - A **TC** point is a special point drawn as a triangle, at a size clearly
-  larger than an X pole marker so the two never read alike. It never takes a
+  larger than an X pole marker so the two never read alike. Route lines stop at
+  the edge of the triangle and resume past it, so the inside of the symbol is
+  left empty rather than being crossed by the line. It never takes a
   letter. One TC point is called `TC`; several are `TC1`, `TC2`, and so on.
 - An **FPB** (feeder pillar box) is drawn as a rectangle sized to its own label
   with `FPB` written inside it. It never takes a letter either. One FPB is called

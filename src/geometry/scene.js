@@ -16,6 +16,7 @@
 
 import { RENDER_PROFILES, createConfig } from '../config.js';
 import { computeBoundingBox } from './network.js';
+import { clipSegmentOutsidePolygon, tcTriangleVertices } from './markers.js';
 
 /**
  * Resolve a render profile by id.
@@ -126,6 +127,27 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
   const labels = [];
   const junctions = [];
 
+  // The TC triangles are resolved before the lines, because a line must not be
+  // drawn through the inside of the symbol. Each triangle becomes a hole the
+  // lines are trimmed against.
+  const tcShapes = [];
+  if (activeProfile.showTcMarkers) {
+    for (const node of nodes) {
+      if (!node.tcId) continue;
+      const p = toPixel(node);
+      const shape = {
+        id: `tc:${node.key}`,
+        x: p.x,
+        y: p.y,
+        halfWidth: config.tcMarkerSize * tcScale,
+        height: config.tcMarkerHeight * tcScale,
+        name: node.tcName,
+      };
+      shape.vertices = tcTriangleVertices(shape);
+      tcShapes.push(shape);
+    }
+  }
+
   if (activeProfile.showLines) {
     for (const edge of network.graph.edges.values()) {
       const a = network.graph.nodes.get(edge.a);
@@ -133,14 +155,26 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
       if (!a || !b) continue;
       const pa = toPixel(a);
       const pb = toPixel(b);
-      lines.push({
-        id: `line:${edge.key}`,
-        x1: pa.x,
-        y1: pa.y,
-        x2: pb.x,
-        y2: pb.y,
-        strokeWidth: config.lineWidth,
-        sources: edge.sources.map((s) => s.routeId),
+      // Trim the line to the outside of every TC triangle it crosses, so the
+      // route appears to enter and leave the symbol without running over it.
+      let parts = [{ x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y }];
+      for (const shape of tcShapes) {
+        parts = parts.flatMap((part) =>
+          clipSegmentOutsidePolygon(part.x1, part.y1, part.x2, part.y2, shape.vertices),
+        );
+        if (parts.length === 0) break;
+      }
+      parts.forEach((part, index) => {
+        lines.push({
+          id: parts.length > 1 ? `line:${edge.key}#${index}` : `line:${edge.key}`,
+          parentId: `line:${edge.key}`,
+          x1: part.x1,
+          y1: part.y1,
+          x2: part.x2,
+          y2: part.y2,
+          strokeWidth: config.lineWidth,
+          sources: edge.sources.map((s) => s.routeId),
+        });
       });
     }
   }
@@ -163,16 +197,6 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
     }
     if (activeProfile.showJunctionMarkers && node.neighbors.size > 2) {
       junctions.push({ id: `junction:${node.key}`, x: p.x, y: p.y, degree: node.neighbors.size });
-    }
-    if (activeProfile.showTcMarkers && node.tcId) {
-      tc.push({
-        id: `tc:${node.key}`,
-        x: p.x,
-        y: p.y,
-        halfWidth: config.tcMarkerSize * tcScale,
-        height: config.tcMarkerHeight * tcScale,
-        name: node.tcName,
-      });
     }
     if (activeProfile.showFpbMarkers && node.fpbId) {
       // The box is sized from its own text, so it always fits the label.
@@ -221,6 +245,11 @@ export function buildScene(network, profile = 'preview', configOverrides = {}) {
         offsetY: -config.poleMarkerSize - 9,
       });
     }
+  }
+
+  for (const shape of tcShapes) {
+    const { vertices, ...primitive } = shape;
+    tc.push(primitive);
   }
 
   // Deterministic ordering keeps diffing, tests and exports stable.

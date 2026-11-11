@@ -10,6 +10,8 @@
  * raster image, so the result can be inserted into Word and PowerPoint.
  */
 
+import { tcTrianglePoints as tcTrianglePointsFrom } from '../geometry/markers.js';
+
 /** Escape text for XML content and attribute values. */
 export function escapeXml(value) {
   return String(value)
@@ -43,14 +45,15 @@ export function poleCrossPath(pole) {
  * Build the TC triangle points. The triangle hangs below its anchor pole so
  * that the X and the triangle both remain identifiable.
  *
+ * The outline comes from `geometry/markers.js`, which the scene builder also
+ * uses to trim route lines against. Keeping one source means the hole in the
+ * line always matches the shape actually drawn.
+ *
  * @param {{x: number, y: number, halfWidth: number, height: number}} tc TC primitive.
  * @returns {string} `points` attribute for a polygon.
  */
 export function tcTrianglePoints(tc) {
-  const { x, y, halfWidth, height } = tc;
-  const top = y + halfWidth * 0.35;
-  const bottom = top + height;
-  return `${num(x)},${num(top)} ${num(x + halfWidth)},${num(bottom)} ${num(x - halfWidth)},${num(bottom)}`;
+  return tcTrianglePointsFrom(tc, num);
 }
 
 /**
@@ -91,7 +94,10 @@ export function renderSceneToSvg(scene, options = {}) {
     parts.push(`<g id="route-lines" fill="none" stroke="#111" stroke-linecap="square">`);
     for (const line of scene.lines) {
       parts.push(
-        `<line id="${escapeXml(line.id)}" x1="${num(line.x1)}" y1="${num(line.y1)}" ` +
+        // A line trimmed around a TC triangle is emitted as several pieces that
+        // share one `data-edge`, so a consumer can still count route edges.
+        `<line id="${escapeXml(line.id)}" data-edge="${escapeXml(line.parentId ?? line.id)}" ` +
+          `x1="${num(line.x1)}" y1="${num(line.y1)}" ` +
           `x2="${num(line.x2)}" y2="${num(line.y2)}" stroke-width="${num(line.strokeWidth)}"/>`,
       );
     }
