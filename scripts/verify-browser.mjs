@@ -251,7 +251,36 @@ const topologySame = await page.evaluate(() => {
 });
 record('span spacing does not change topology', topologySame.lines === 33 && topologySame.poles === 34, JSON.stringify(topologySame));
 
-// ---- 12. console cleanliness ----------------------------------------
+// ---- 12. TC point is selectable by its TC identifier -----------------
+await page.click('#btn-load-example');
+await page.waitForTimeout(150);
+const fromOptions = await page.evaluate(() =>
+  [...document.querySelectorAll('#field-from option')].map((o) => o.textContent),
+);
+record(
+  'dropdown offers the TC point by its identifier',
+  fromOptions.includes('TC'),
+  fromOptions.join(','),
+);
+
+// ---- 13. deleting an earlier route invalidates dependents ------------
+await page.locator('#route-rows tr').nth(0).locator('button[data-action="delete"]').click();
+await page.waitForTimeout(150);
+const invalidCount = await page.locator('#route-rows .status-bad').count();
+const errorShown = await page.evaluate(() => {
+  const box = document.querySelector('#error-list');
+  return { hidden: box.hidden, text: box.textContent };
+});
+record('deleting a source row marks dependents invalid', invalidCount > 0, `invalid rows=${invalidCount}`);
+record(
+  'dependent rows are explained, not dropped',
+  !errorShown.hidden && /has not been created yet/i.test(errorShown.text),
+  errorShown.text.slice(0, 120),
+);
+const blocked = await page.evaluate(() => document.querySelector('#btn-pdf').disabled);
+record('export is blocked while dependents are invalid', blocked);
+
+// ---- 14. console cleanliness ----------------------------------------
 record('no console or page errors', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 await page.screenshot({ path: resolve(OUT, 'preview.png'), fullPage: true });

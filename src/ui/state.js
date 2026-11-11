@@ -57,8 +57,10 @@ export function buildFromState(state) {
 /**
  * Endpoints available as a starting point for the route at `index`.
  *
- * Replays the instructions before `index` and returns the endpoints the
- * builder itself created, which is exactly the set that is valid to reference.
+ * Replays the instructions before `index` and returns every endpoint the builder
+ * created, which is exactly the set that is valid to reference at that point:
+ * the Origin plus each earlier route's destination, whether or not that
+ * destination has already been reused.
  *
  * @param {Array<object>} routes Route list.
  * @param {number} index Position being edited; pass `routes.length` for a new row.
@@ -67,17 +69,11 @@ export function buildFromState(state) {
 export function availableSources(routes, index) {
   const prefix = routes.slice(0, index);
   const network = buildNetwork(prefix);
-  return network.endpoints
-    .filter((endpoint) => {
-      if (endpoint.kind === 'origin') return true;
-      if (!endpoint.usedAsSource) return false;
-      return true;
-    })
-    .map((endpoint) => ({
-      id: endpoint.id,
-      label: endpointLabel(endpoint),
-      kind: endpoint.kind,
-    }));
+  return network.endpoints.map((endpoint) => ({
+    id: endpoint.id,
+    label: endpointLabel(endpoint),
+    kind: endpoint.kind,
+  }));
 }
 
 /** Human-readable dropdown label for an endpoint. */
