@@ -43,6 +43,51 @@ const VALID_LAYOUTS = new Set(Object.keys(PAGE_LAYOUTS));
  * @param {string} project.layout Page layout id.
  * @returns {object} Plain object ready for `JSON.stringify`.
  */
+/**
+ * Whether two authored projects describe the same drawing.
+ *
+ * Used to decide whether opening a project would actually replace anything. The
+ * two are compared field by field in a fixed order, including route identity and
+ * row order, because swapping two rows can change which endpoint later routes
+ * start from. Numbers are normalised so a restored `40` and a typed `"40"` are
+ * not treated as different, and booleans likewise.
+ *
+ * Derived data is not part of the comparison: it does not exist in a project
+ * payload and is rebuilt on load anyway. Nothing here reads the DOM or the
+ * viewport, so the answer depends only on what would be saved.
+ *
+ * @param {object} a Authored project.
+ * @param {object} b Authored project.
+ * @returns {boolean} True when opening one in place of the other changes nothing.
+ */
+export function sameAuthoredProject(a, b) {
+  return authoredSignature(a) === authoredSignature(b);
+}
+
+/**
+ * A stable string describing everything a user authored.
+ *
+ * @param {object} project Authored project.
+ * @returns {string} Signature.
+ */
+function authoredSignature(project) {
+  if (!project || typeof project !== 'object') return '';
+  const routes = Array.isArray(project.routes) ? project.routes : [];
+  return JSON.stringify({
+    originMarker: project.originMarker,
+    spanLength: Number(project.spanLength),
+    layout: project.layout,
+    routes: routes.map((route) => ({
+      id: route.id,
+      from: route.from,
+      direction: route.direction,
+      spans: Number(route.spans),
+      tc: Boolean(route.tc),
+      fpb: Boolean(route.fpb),
+    })),
+  });
+}
+
 export function toProjectPayload(project) {
   return {
     routes: (project.routes ?? []).map((route) => ({

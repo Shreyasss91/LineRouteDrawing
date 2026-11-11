@@ -52,9 +52,28 @@ when the file is opened, so an edited file cannot smuggle in a wrong picture.
 
 Loading is all-or-nothing. A file that is damaged, is not a project file, or was
 written by a newer version of this tool is refused with a message saying which,
-and the drawing on screen is left exactly as it was. Loading over an existing
-drawing asks first. **Clear all** is remembered too, so a reload after clearing
-stays empty rather than bringing the old drawing back.
+and the drawing on screen is left exactly as it was. It asks before replacing
+anything that would actually change - including a saved project that has no route
+rows but a different Origin symbol, spacing or page layout - and stays silent when
+the file is the same as what is already open. **Clear all** is remembered too, so
+a reload after clearing stays empty rather than bringing the old drawing back.
+
+A route keeps the identity it was saved with. That is what makes selecting,
+editing and deleting behave on a reopened project exactly as they did before it
+was saved.
+
+#### When the remembered project cannot be read
+
+If the copy in this browser is damaged, or was written by a newer version of the
+tool, it is **not** replaced. A bar appears saying the saved drawing is still
+there and unchanged, and that automatic saving is paused. You can keep working on
+what is on screen and **Save project** still downloads it, so nothing is trapped.
+Nothing is written to the browser while this bar is showing.
+
+The saved copy is only discarded when you say so. Both buttons on the bar ask for
+confirmation first, because discarding cannot be undone: one starts again from the
+example, the other from a blank drawing. Once you have chosen, automatic saving
+resumes and the next reload restores whatever you decided on.
 
 ### How names appear
 
@@ -203,3 +222,6 @@ only browser and Node built-ins.
   exported drawing carries no text at all.
 - The remembered project lives in one browser on one computer. Clearing the
   browser's site data removes it, which is why **Save project** exists.
+- If the remembered project cannot be read, this build cannot repair it. It keeps
+  it, pauses saving and explains the situation, but recovering the drawing itself
+  needs the version of the tool that wrote it.

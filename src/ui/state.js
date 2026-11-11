@@ -18,8 +18,49 @@ export { normalizeMarkerKind } from '../geometry/network.js';
 
 let routeCounter = 0;
 
-/** Create a fresh instruction with a stable internal id. */
-export function createRoute({ from = '', direction = 'north', spans = 1, tc = false, fpb = false } = {}) {
+/** Extract the numeric part of a generated id, or 0 when it is something else. */
+function routeIdNumber(id) {
+  const match = /^route-(\d+)$/.exec(String(id ?? ''));
+  return match ? Number(match[1]) : 0;
+}
+
+/**
+ * Advance the counter past an id that came from a saved project.
+ *
+ * Restored ids are not generated here, so a later `createRoute` could produce a
+ * number that is already taken: a project saved with `route-7` and reloaded into
+ * a fresh page (counter still 0) would hand the next new route `route-1` while
+ * `route-7` sits in the table, and a page whose session had already made nine
+ * routes would collide immediately. Raising the counter on hydration keeps one
+ * id space, so "the next new route" can never be an existing one.
+ *
+ * @param {string} id Restored id.
+ */
+export function reserveRouteId(id) {
+  const n = routeIdNumber(id);
+  if (n > routeCounter) routeCounter = n;
+  return id;
+}
+
+/**
+ * Create an instruction with a stable internal id.
+ *
+ * An explicit `id` is kept as given, which is what makes a restored project
+ * identify the same rows it was saved with. Omitted, a fresh id is generated.
+ * With `id` supplied the counter is raised past it so the two cannot collide.
+ */
+export function createRoute({
+  id = null,
+  from = '',
+  direction = 'north',
+  spans = 1,
+  tc = false,
+  fpb = false,
+} = {}) {
+  if (id !== null && id !== undefined) {
+    reserveRouteId(id);
+    return { id, from, direction, spans, tc, fpb };
+  }
   routeCounter += 1;
   return { id: `route-${routeCounter}`, from, direction, spans, tc, fpb };
 }

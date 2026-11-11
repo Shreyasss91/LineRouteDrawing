@@ -15,9 +15,10 @@ import { checkSpanClearance, requiredSpanLength } from '../geometry/clearance.js
 import {
   parseProjectJson,
   projectFileName,
+  sameAuthoredProject,
   serializeProjectJson,
 } from './project.js';
-import { loadFromStorage, saveToStorage } from './storage.js';
+import { clearStorage, loadFromStorage, saveToStorage } from './storage.js';
 import { renderSceneToSvg } from '../render/svg.js';
 import { renderSceneToPdf } from '../render/pdf.js';
 import {
@@ -54,6 +55,10 @@ const dom = {
   originMarker: el('field-origin-marker'),
   spacingWarning: el('spacing-warning'),
   persistenceNotice: el('persistence-notice'),
+  recoveryBar: el('recovery-bar'),
+  recoveryText: el('recovery-text'),
+  recoveryDiscard: el('btn-recovery-discard'),
+  recoveryNew: el('btn-recovery-new'),
   saveProject: el('btn-save-project'),
   loadProject: el('btn-load-project'),
   projectFile: el('field-project-file'),
@@ -94,13 +99,33 @@ let current = { network: buildNetwork([]), scene: null };
 let persistenceNotice = null;
 
 /**
+ * Set while a saved project exists that this build could not read.
+ *
+ * Automatic saving is paused for the whole of it. The stored value is the only
+ * copy of whatever the user had, so writing over it - even with an unchanged
+ * drawing, even on a reload - would destroy data nobody asked to lose. Only the
+ * user's explicit decision releases this.
+ */
+let recoveryPending = false;
+
+/** The sentence shown in the recovery bar while it is pending. */
+let recoveryNotice = null;
+
+/**
  * Remember the current project in the browser.
  *
  * Called after every action that changes what the user has authored. A failure
  * is reported but never thrown: losing the ability to remember is not a reason
  * to stop them drawing.
+ *
+ * While recovery is pending nothing is written. This is the single gate that
+ * keeps an unreadable project intact: every mutation in the app funnels through
+ * here, so none of them can reach storage by another path.
  */
 function persistProject() {
+  if (recoveryPending) {
+    return { ok: false, code: 'RECOVERY_PENDING', message: null, savedAt: null };
+  }
   const result = saveToStorage({
     routes: state.routes,
     originMarker: state.originMarker,
@@ -135,8 +160,12 @@ function renderPersistenceNotice() {
  * @param {{refit?: boolean}} [options]
  */
 function applyProject(project, options = {}) {
+  // The saved ids come back unchanged. Regenerating them would be invisible
+  // until something referred to one - a selection, an edit, a delete - and then
+  // the wrong row would be affected.
   state.routes = project.routes.map((route) =>
     createRoute({
+      id: route.id,
       from: route.from,
       direction: route.direction,
       spans: route.spans,
@@ -159,36 +188,145 @@ function applyProject(project, options = {}) {
 /**
  * Restore the remembered project at startup.
  *
- * Precedence: a readable project wins; nothing remembered falls through to the
- * example; an unreadable project is reported and left alone rather than
- * overwritten, with the example shown so the session is still usable.
+ * Four outcomes are reported differently, because they ask different things of
+ * the user and confusing them is what loses data:
  *
- * @returns {boolean} True when a remembered project was applied.
+ *   - `restored`     a saved project was read and applied. Normal.
+ *   - `empty`        nothing was ever saved. The example is shown.
+ *   - `unavailable`  storage cannot be used. Reported as a limitation, not a
+ *                    fault, and the example is shown.
+ *   - `recovery`     something is saved but this build cannot read it. The copy
+ *                    is left exactly as it is and automatic saving stops until
+ *                    the user decides.
+ *
+ * @returns {'restored'|'empty'|'unavailable'|'recovery'} What happened.
  */
 function restoreOrStart() {
   const result = loadFromStorage();
 
   if (result.status === 'ok') {
     applyProject(result.project, { refit: true });
-    return true;
+    return 'restored';
   }
 
   if (result.status === 'invalid') {
-    // Deliberately do not overwrite: the user's data is still there and a
-    // corrected build may be able to read it.
-    persistenceNotice = result.message;
-    renderPersistenceNotice();
+    // Recovery, not an empty state. Nothing is written from here on: the stored
+    // value is the user's only copy and only an explicit choice may replace it.
+    recoveryPending = true;
+    showRecovery(result.message, result.raw);
+    // The session stays usable. The example is shown with persistence paused,
+    // so working on it cannot touch what is stored.
     loadExample();
-    return false;
+    return 'recovery';
   }
 
   if (result.status === 'unavailable') {
     persistenceNotice = result.message;
     renderPersistenceNotice();
+    loadExample();
+    return 'unavailable';
   }
 
   loadExample();
-  return false;
+  return 'empty';
+}
+
+/**
+ * Show the recovery bar for an unreadable saved project.
+ *
+ * Kept as a distinct, persistent element rather than the ordinary notice: it
+ * stays on screen until the user resolves it, because it describes a state that
+ * outlives any single action.
+ *
+ * @param {string} message What is wrong, in the user's terms.
+ * @param {string} [raw] The stored text, so its length can be reported.
+ */
+function showRecovery(message, raw) {
+  const detail =
+    'Your saved drawing is still in this browser and has not been changed. ' +
+    'It could not be opened here, so automatic saving is paused until you decide ' +
+    'what to do with it. You can keep working, and Save project will download ' +
+    'what is on screen now.';
+  const size = typeof raw === 'string' ? ` (${raw.length} characters)` : '';
+
+  recoveryNotice = `${message} ${detail} Saved copy${size}.`;
+  if (dom.recoveryBar) {
+    dom.recoveryBar.hidden = false;
+    if (dom.recoveryText) dom.recoveryText.textContent = recoveryNotice;
+  }
+  // The ordinary notice is for saving problems; this one has its own bar.
+  persistenceNotice = null;
+  renderPersistenceNotice();
+}
+
+/** Clear the recovery state, which resumes automatic saving. */
+function endRecovery() {
+  recoveryPending = false;
+  recoveryNotice = null;
+  if (dom.recoveryBar) dom.recoveryBar.hidden = true;
+  if (dom.recoveryText) dom.recoveryText.textContent = '';
+}
+
+/**
+ * Discard the unreadable saved project, after confirmation, and start again.
+ *
+ * This is the only path that may replace an unreadable copy. The old value is
+ * removed rather than overwritten through a shifted key: a copy to a second key
+ * would leave two projects on the origin and no promise that the second write
+ * succeeded, so the raw value is simply released once the user has said so.
+ *
+ * @param {'example'|'blank'} [kind] What to start from.
+ */
+function discardUnreadableProject(kind = 'example') {
+  const proceed = window.confirm(
+    'The saved drawing in this browser could not be opened. ' +
+      'Discarding it cannot be undone: any work it holds will be lost. ' +
+      'Save project first if you want to keep a copy of what is on screen now. ' +
+      'Discard the saved drawing and start again?',
+  );
+  if (!proceed) return;
+
+  const removed = clearStorage();
+  endRecovery();
+
+  if (kind === 'blank') {
+    state.routes = [];
+    clearForm();
+    refresh({ refit: false });
+  } else {
+    loadExample();
+  }
+
+  // Only now may storage be written, and only because the user chose it.
+  persistProject();
+  if (!removed) {
+    persistenceNotice = 'The saved drawing could not be removed, so this browser will not remember this one.';
+    renderPersistenceNotice();
+  }
+}
+
+/**
+ * The parts of the live state a user authors, in the same shape a project uses.
+ *
+ * Derived data is excluded so two descriptions of the same drawing compare
+ * equal, and DOM state is never read: what is compared is what would be saved.
+ *
+ * @returns {object} Authored project.
+ */
+function currentAuthoredProject() {
+  return {
+    routes: state.routes.map((route) => ({
+      id: route.id,
+      from: route.from,
+      direction: route.direction,
+      spans: route.spans,
+      tc: route.tc,
+      fpb: route.fpb,
+    })),
+    originMarker: state.originMarker,
+    spanLength: state.spanLength,
+    layout: state.layout,
+  };
 }
 
 /** Save the project to a downloadable file. */
@@ -237,11 +375,14 @@ async function loadProjectFile(file) {
     return;
   }
 
-  const hasWork = state.routes.length > 0;
-  if (hasWork) {
+  // Confirm only when something would actually be lost. "Is the table empty" is
+  // the wrong question: a project with no routes may still hold an Origin
+  // symbol, a spacing and a page layout the user chose, and replacing those
+  // without asking is the same silent loss on a smaller scale.
+  if (!sameAuthoredProject(currentAuthoredProject(), parsed.project)) {
     const proceed = window.confirm(
-      'Open this project and replace the drawing on screen? ' +
-        'The current drawing is not kept.',
+      'Open this project and replace what is on screen? ' +
+        'The current drawing and settings are not kept.',
     );
     if (!proceed) return;
   }
@@ -814,6 +955,12 @@ function setupEventListeners() {
   dom.svg.addEventListener('click', exportSvg);
   dom.print.addEventListener('click', printDrawing);
   dom.saveProject.addEventListener('click', saveProjectFile);
+  if (dom.recoveryDiscard) {
+    dom.recoveryDiscard.addEventListener('click', () => discardUnreadableProject('example'));
+  }
+  if (dom.recoveryNew) {
+    dom.recoveryNew.addEventListener('click', () => discardUnreadableProject('blank'));
+  }
   dom.loadProject.addEventListener('click', () => dom.projectFile.click());
   dom.projectFile.addEventListener('change', () => {
     const file = dom.projectFile.files && dom.projectFile.files[0];

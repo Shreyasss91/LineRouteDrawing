@@ -12,6 +12,7 @@
  */
 
 import { chromium } from 'playwright';
+import { STORAGE_KEY } from '../src/ui/storage.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -204,8 +205,20 @@ await page.evaluate(() => {
   };
 });
 let printDialogSeen = false;
-page.on('dialog', () => {
+/**
+ * How the next dialog should be answered.
+ *
+ * One handler owns every dialog: two competing handlers both try to answer the
+ * same one and the second throws. Checks set this mode before the action that
+ * asks, and read dialogLog afterwards to see what was asked.
+ */
+let dialogMode = 'accept';
+const dialogLog = [];
+page.on('dialog', (dialog) => {
   printDialogSeen = true;
+  dialogLog.push(dialog.message());
+  const answer = dialogMode === 'dismiss' ? dialog.dismiss() : dialog.accept();
+  answer.catch(() => {});
 });
 // Intercept the iframe's print call instead of opening a real dialog.
 await page.addInitScript(() => {});
@@ -874,7 +887,317 @@ record(
 await page.click('#btn-load-example');
 await page.waitForTimeout(200);
 
-// ---- 22. console cleanliness ----------------------------------------
+// ---- 22. startup recovery keeps an unreadable project intact --------
+// The failure this covers destroyed data: startup detected an unreadable saved
+// project, then loaded and saved the example over it. Verified in a real browser
+// because the bug lived in startup ordering and DOM wiring, not in a pure
+// function.
+const corruptedValue = '{"format":"line-route-drawing-project","routes": oops oops';
+await page.evaluate(([k, v]) => localStorage.setItem(k, v), [STORAGE_KEY, corruptedValue]);
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(700);
+
+const recovering = await page.evaluate((k) => ({
+  raw: localStorage.getItem(k),
+  barShown: !document.querySelector('#recovery-bar').hidden,
+  text: document.querySelector('#recovery-text').textContent,
+  rows: document.querySelectorAll('#route-rows tr').length,
+}), STORAGE_KEY);
+record(
+  'an unreadable saved project shows recovery instead of being replaced',
+  recovering.barShown && recovering.rows > 0 && recovering.raw === corruptedValue,
+  `bar=${recovering.barShown} rows=${recovering.rows}`,
+);
+record(
+  'the recovery notice says the saved data was kept and saving paused',
+  /has not been changed/.test(recovering.text) &&
+    /automatic saving is paused/.test(recovering.text) &&
+    /Save project/.test(recovering.text),
+  recovering.text.slice(0, 90),
+);
+
+// Working while recovery is pending must not write over the saved value.
+await page.fill('#field-spans', '2');
+await page.click('#btn-save-route');
+await page.waitForTimeout(200);
+await page.locator('#route-rows tr').nth(0).locator('button[data-action="delete"]').click();
+await page.waitForTimeout(200);
+await page.fill('#field-spacing', '60');
+await page.locator('#field-spacing').dispatchEvent('change');
+await page.waitForTimeout(200);
+await page.selectOption('#field-origin-marker', 'tc');
+await page.waitForTimeout(200);
+const afterWorking = await page.evaluate((k) => localStorage.getItem(k), STORAGE_KEY);
+record(
+  'adding, deleting and changing settings cannot overwrite it while recovering',
+  afterWorking === corruptedValue,
+  String(afterWorking).slice(0, 40),
+);
+
+// A reload while pending must not overwrite it either.
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(600);
+const afterPendingReload = await page.evaluate((k) => ({
+  raw: localStorage.getItem(k),
+  barShown: !document.querySelector('#recovery-bar').hidden,
+}), STORAGE_KEY);
+record(
+  'reloading while recovery is pending still preserves the saved value',
+  afterPendingReload.raw === corruptedValue && afterPendingReload.barShown,
+  `bar=${afterPendingReload.barShown}`,
+);
+
+// Manual Save project must still work while recovering.
+const recoveryDownload = await Promise.all([
+  page.waitForEvent('download'),
+  page.click('#btn-save-project'),
+]).then(([d]) => d);
+const recoveryPath = resolve(OUT, 'recovery-session.json');
+await recoveryDownload.saveAs(recoveryPath);
+const recoveryDoc = JSON.parse(readFileSync(recoveryPath, 'utf8'));
+record(
+  'Save project still downloads the current session while recovering',
+  recoveryDoc.format === 'line-route-drawing-project' && recoveryDoc.project.routes.length > 0,
+  `${recoveryDoc.project.routes.length} routes`,
+);
+
+// Declining the discard must change nothing.
+dialogMode = 'dismiss';
+await page.click('#btn-recovery-discard');
+await page.waitForTimeout(300);
+const afterDecline = await page.evaluate((k) => ({
+  raw: localStorage.getItem(k),
+  barShown: !document.querySelector('#recovery-bar').hidden,
+}), STORAGE_KEY);
+record(
+  'declining the discard leaves the saved project untouched',
+  afterDecline.raw === corruptedValue && afterDecline.barShown,
+  `bar=${afterDecline.barShown}`,
+);
+
+// Accepting it is the only way new persistence starts.
+dialogMode = 'accept';
+await page.click('#btn-recovery-discard');
+await page.waitForTimeout(500);
+const afterDiscard = await page.evaluate((k) => ({
+  raw: localStorage.getItem(k),
+  barShown: !document.querySelector('#recovery-bar').hidden,
+}), STORAGE_KEY);
+let discardedDoc = null;
+try {
+  discardedDoc = JSON.parse(afterDiscard.raw);
+} catch {
+  discardedDoc = null;
+}
+record(
+  'an explicit confirmed discard enables persistence again',
+  !afterDiscard.barShown &&
+    discardedDoc?.format === 'line-route-drawing-project' &&
+    afterDiscard.raw !== corruptedValue,
+  `bar=${afterDiscard.barShown}`,
+);
+
+// And the next reload restores that newly authorised project.
+await page.fill('#field-spacing', '64');
+await page.locator('#field-spacing').dispatchEvent('change');
+await page.waitForTimeout(250);
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForSelector('#preview-canvas svg');
+await page.waitForTimeout(400);
+const afterAuthorised = await page.evaluate(() => ({
+  spacing: document.querySelector('#field-spacing').value,
+  barShown: !document.querySelector('#recovery-bar').hidden,
+}));
+record(
+  'the next reload restores the newly authorised project',
+  afterAuthorised.spacing === '64' && !afterAuthorised.barShown,
+  JSON.stringify(afterAuthorised),
+);
+
+// ---- 23. an unsupported future version is recovery, not empty -------
+const futureValue = JSON.stringify({
+  format: 'line-route-drawing-project',
+  schemaVersion: 99,
+  metadata: { savedAt: '2026-01-01T00:00:00.000Z' },
+  project: { routes: [], originMarker: 'plain', spanLength: 40, layout: 'a4_landscape' },
+});
+await page.evaluate(([k, v]) => localStorage.setItem(k, v), [STORAGE_KEY, futureValue]);
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(600);
+const futureState = await page.evaluate((k) => ({
+  raw: localStorage.getItem(k),
+  barShown: !document.querySelector('#recovery-bar').hidden,
+  text: document.querySelector('#recovery-text').textContent,
+}), STORAGE_KEY);
+record(
+  'a project from a newer version is preserved and explained, not treated as empty',
+  futureState.barShown && futureState.raw === futureValue && /newer version/.test(futureState.text),
+  futureState.text.slice(0, 80),
+);
+
+// Leave a clean, ordinary session behind.
+await page.evaluate((k) => localStorage.removeItem(k), STORAGE_KEY);
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(500);
+
+// ---- 24. route identity survives save, load and a fresh page --------
+await page.click('#btn-load-example');
+await page.waitForTimeout(200);
+const identityDownload = await Promise.all([
+  page.waitForEvent('download'),
+  page.click('#btn-save-project'),
+]).then(([d]) => d);
+const identityPath = resolve(OUT, 'identity-project.json');
+await identityDownload.saveAs(identityPath);
+const identityDoc = JSON.parse(readFileSync(identityPath, 'utf8'));
+const savedRouteIds = identityDoc.project.routes.map((r) => r.id);
+
+// A fresh page, so the id generator is at the start of its sequence.
+await page.evaluate((k) => localStorage.removeItem(k), STORAGE_KEY);
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+await page.setInputFiles('#field-project-file', identityPath);
+await page.waitForTimeout(600);
+const restoredIds = await page.evaluate(() =>
+  [...document.querySelectorAll('#route-rows tr')].map((r) => r.dataset.id),
+);
+record(
+  'restored routes keep the ids they were saved with',
+  JSON.stringify(restoredIds) === JSON.stringify(savedRouteIds),
+  restoredIds.join(','),
+);
+
+// Editing one restored route must not disturb the others.
+await page.locator('#route-rows tr').nth(1).click();
+await page.waitForTimeout(200);
+await page.fill('#field-spans', '5');
+await page.click('#btn-save-route');
+await page.waitForTimeout(250);
+const afterEditIds = await page.evaluate(() =>
+  [...document.querySelectorAll('#route-rows tr')].map((r) => r.dataset.id),
+);
+record(
+  'editing a restored route leaves every other id unchanged',
+  JSON.stringify(afterEditIds) === JSON.stringify(savedRouteIds),
+  afterEditIds.join(','),
+);
+
+// A new route must not reuse a restored id.
+await page.selectOption('#field-direction', 'east');
+await page.fill('#field-spans', '1');
+await page.click('#btn-save-route');
+await page.waitForTimeout(250);
+const withNew = await page.evaluate(() =>
+  [...document.querySelectorAll('#route-rows tr')].map((r) => r.dataset.id),
+);
+record(
+  'a new route after an import takes an id no restored route uses',
+  new Set(withNew).size === withNew.length &&
+    withNew.length === savedRouteIds.length + 1 &&
+    !savedRouteIds.includes(withNew[withNew.length - 1]),
+  withNew.join(','),
+);
+
+// ---- 25. replacement asks only when something would be lost ---------
+
+const writeProject = (name, next) => {
+  const target = resolve(OUT, name);
+  writeFileSync(target, JSON.stringify(next));
+  return target;
+};
+
+// An identical project, applied over an identical one: no question.
+await page.setInputFiles('#field-project-file', writeProject('same-project.json', identityDoc));
+await page.waitForTimeout(500);
+const beforeSame = dialogLog.length;
+await page.setInputFiles('#field-project-file', resolve(OUT, 'same-project.json'));
+await page.waitForTimeout(500);
+record(
+  'loading an identical project asks nothing',
+  dialogLog.length === beforeSame,
+  `dialogs ${beforeSame} -> ${dialogLog.length}`,
+);
+
+// Empty projects differing only in a setting must still ask.
+const emptyFpb = {
+  ...identityDoc,
+  project: { ...identityDoc.project, routes: [], originMarker: 'fpb' },
+};
+const emptyPole = {
+  ...identityDoc,
+  project: { ...identityDoc.project, routes: [], originMarker: 'plain' },
+};
+await page.setInputFiles('#field-project-file', writeProject('empty-fpb.json', emptyFpb));
+await page.waitForTimeout(450);
+
+for (const [name, next, label] of [
+  ['empty-pole.json', emptyPole, 'Origin symbol'],
+  [
+    'empty-spacing.json',
+    { ...emptyPole, project: { ...emptyPole.project, spanLength: 88 } },
+    'span spacing',
+  ],
+  [
+    'empty-layout.json',
+    { ...emptyPole, project: { ...emptyPole.project, spanLength: 88, layout: 'a3_landscape' } },
+    'page layout',
+  ],
+]) {
+  const countBefore = dialogLog.length;
+  await page.setInputFiles('#field-project-file', writeProject(name, next));
+  await page.waitForTimeout(450);
+  record(
+    `an empty project differing only in ${label} still asks before replacing`,
+    dialogLog.length > countBefore,
+    `dialogs ${countBefore} -> ${dialogLog.length}`,
+  );
+}
+
+// Declining must change nothing at all.
+dialogMode = 'dismiss';
+const beforeDeclining = await page.evaluate(() => ({
+  spacing: document.querySelector('#field-spacing').value,
+  layout: document.querySelector('#field-layout').value,
+  origin: document.querySelector('#field-origin-marker').value,
+}));
+await page.setInputFiles('#field-project-file', identityPath);
+await page.waitForTimeout(500);
+dialogMode = 'accept';
+const afterDeclining = await page.evaluate(() => ({
+  spacing: document.querySelector('#field-spacing').value,
+  layout: document.querySelector('#field-layout').value,
+  origin: document.querySelector('#field-origin-marker').value,
+}));
+record(
+  'declining the replacement leaves the current project unchanged',
+  JSON.stringify(beforeDeclining) === JSON.stringify(afterDeclining),
+  JSON.stringify(afterDeclining),
+);
+
+// An invalid file reports its problem rather than asking to replace.
+const beforeInvalid = dialogLog.length;
+writeFileSync(
+  resolve(OUT, 'invalid-import.json'),
+  '{"format":"line-route-drawing-project","schemaVersion":1,"project":{"routes":"nope"}}',
+);
+await page.setInputFiles('#field-project-file', resolve(OUT, 'invalid-import.json'));
+await page.waitForTimeout(500);
+const invalidDialogSeen = dialogLog.length > beforeInvalid;
+const badNotice = await page.evaluate(() => {
+  const n = document.querySelector('#persistence-notice');
+  return { hidden: n.hidden, text: n.textContent.trim() };
+});
+record(
+  'an invalid file reports the error without asking to replace anything',
+  !invalidDialogSeen && !badNotice.hidden && badNotice.text.length > 0,
+  badNotice.text.slice(0, 70),
+);
+
+// Back to the example for the remaining checks.
+await page.click('#btn-load-example');
+await page.waitForTimeout(250);
+
+// ---- 26. console cleanliness ----------------------------------------
 record('no console or page errors', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 await page.screenshot({ path: resolve(OUT, 'preview.png'), fullPage: true });

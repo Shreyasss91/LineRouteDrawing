@@ -425,6 +425,37 @@ td.cell-actions {
   line-height: 1.45;
 }
 
+.recovery-bar {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #b8860b;
+  border-left-width: 4px;
+  border-radius: 4px;
+  background: #fdf8e8;
+  color: #5c4708;
+}
+
+.recovery-text {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-danger {
+  border-color: #b85c4a;
+  color: #8a3a29;
+}
+
+.btn-danger:hover {
+  background: #fbeeeb;
+}
+
 .spacing-warning {
   margin: 0 0 10px;
   padding: 8px 10px;

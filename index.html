@@ -75,6 +75,18 @@
         </div>
         <p id="persistence-notice" class="persistence-notice" role="status" hidden></p>
 
+        <div id="recovery-bar" class="recovery-bar" role="alert" hidden>
+          <p id="recovery-text" class="recovery-text"></p>
+          <div class="recovery-actions">
+            <button type="button" id="btn-recovery-discard" class="btn btn-danger">
+              Discard saved drawing and start from the example
+            </button>
+            <button type="button" id="btn-recovery-new" class="btn btn-quiet">
+              Discard and start blank
+            </button>
+          </div>
+        </div>
+
         <div class="table-wrap">
           <table>
             <thead>
