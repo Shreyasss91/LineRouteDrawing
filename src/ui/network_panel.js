@@ -420,7 +420,7 @@ export function createNetworkPanel(options) {
       notify('That is not one of the points listed. The load has not been moved.');
       return;
     }
-    const result = reassignLoad(state().loads, load.id, target.id);
+    const result = reassignLoad(state().loads, load.id, target.id, { lookupNode });
     if (!result.ok) {
       notify(result.message);
       return;

@@ -4,7 +4,7 @@
 
 1. [Requirements](#1-requirements)
 2. [Commands](#2-commands)
-3. [The Node suite: 472 tests in 30 files](#3-the-node-suite-472-tests-in-30-files)
+3. [The Node suite: 477 tests in 30 files](#3-the-node-suite-477-tests-in-30-files)
 4. [The browser suite: 230 checks in 12 sections](#4-the-browser-suite-230-checks-in-12-sections)
 5. [The headed print smoke test](#5-the-headed-print-smoke-test)
 6. [Test strategy: what is tested and why](#6-test-strategy-what-is-tested-and-why)
@@ -31,12 +31,12 @@
 
 | Command | What it does | Expected result |
 | --- | --- | --- |
-| `npm test` | `node --test "test/*.test.js"` | **472 tests, 472 pass, 0 fail** |
+| `npm test` | `node --test "test/*.test.js"` | **477 tests, 477 pass, 0 fail** |
 | `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **230/230 checks pass** |
 | `npm run test:print:headed` | `node scripts/print-dialog-smoke.mjs` — opens a real print dialog | manual, needs an interactive terminal |
 | `npm run serve` | static server for manual use | serve locally, then open the printed URL |
 
-Verified on this working tree: `npm test` → `tests 472, pass 472, fail 0`; the suite
+Verified on this working tree: `npm test` → `tests 477, pass 477, fail 0`; the suite
 takes about 1.2 s.
 
 `npm run test:browser` requires the Playwright browser binaries. `test-browser.mjs`
@@ -46,7 +46,7 @@ install command if it is absent, rather than a stack trace.
 The browser suite writes its downloads and diagnostics into a temp directory; nothing
 it produces is committed.
 
-## 3. The Node suite: 472 tests in 30 files
+## 3. The Node suite: 477 tests in 30 files
 
 The whole domain layer is DOM-free, so it is tested directly under Node. Files and
 their test counts:
@@ -62,7 +62,7 @@ their test counts:
 | `fpb_clip.test.js` | 13 | Clipping against the rectangle: miss, wholly inside, splitting, endpoint preservation, visible contact |
 | `geometry.test.js` | 22 | Directions, spans → edges/poles, sequencing, forward references, shared endpoints, overlap, junctions, branches, the example topology |
 | `integration.test.js` | 10 | Route list → network → scene → SVG end to end; the example drawing's counts |
-| `load_eligibility.test.js` | 14 | A load on a TC point refused at all three guarded boundaries; `addLoad()` fails closed without a resolver or an unresolvable target; input not mutated; aliased spellings caught at model, parser and import planner; the raw applier's trust boundary recorded; orphans still kept; eligible points still accepted |
+| `load_eligibility.test.js` | 19 | A load on a TC point refused at all four guarded boundaries — creation, move, import and file; `addLoad()` and `reassignLoad()` both fail closed without a resolver or with an unresolvable target, and a rejected move leaves the input untouched; the import planner refuses without both `lookupNode` and `isEligible`; aliased spellings caught at model, reassign, parser and import planner; eligible re-targets keep id, value and unit; orphans still kept; eligible creates still accepted |
 | `migration.test.js` | 20 | v1→v2, v2→v3, defaults, warnings, no invented measurements |
 | `mini_preview.test.js` | 11 | Fitted viewBox, designation overlay, empty state, scaling of label text |
 | `origin_label.test.js` | 13 | The `Origin` word's placement, per-marker-kind behaviour, profile gating |
@@ -178,7 +178,7 @@ The suite is organised around **contracts**, not around files:
    `geometry.test.js` pin the example drawing at 34 nodes / 33 edges / the endpoint
    set, so a change in the walk shows up immediately.
 6. **DOM-free by construction.** Nothing in `test/` loads a browser; nothing in
-   `src/geometry/` or `src/data/` needs one. This is why 472 tests run in ~1.2 s.
+   `src/geometry/` or `src/data/` needs one. This is why 477 tests run in ~1.2 s.
 
 ## 7. Writing a new test
 

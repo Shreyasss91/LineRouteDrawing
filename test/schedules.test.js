@@ -155,12 +155,15 @@ test('10. editing a value does not move the load', () => {
 });
 
 test('11. moving a load is a separate, explicit action', () => {
+  const lookupNode = () => ({ nodeType: 'pole' });
   let loads = insertLoadRecord(createLoadSchedule(), { nodeId: 'dst:r1', value: 10 }).loads;
   const id = loads[0].id;
-  const result = reassignLoad(loads, id, 'dst:r2');
+  const result = reassignLoad(loads, id, 'dst:r2', { lookupNode });
   assert.equal(result.ok, true);
   assert.equal(result.loads[0].nodeId, 'dst:r2');
   assert.equal(result.loads[0].id, id, 'reassigning keeps the record identity');
+  assert.equal(result.loads[0].value, 10, 'reassigning keeps the value');
+  assert.equal(result.loads[0].unit, 'kVA', 'reassigning keeps the unit');
 });
 
 test("12. a record can be removed, and a node's records removed together", () => {

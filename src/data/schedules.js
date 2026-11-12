@@ -307,17 +307,11 @@ export function addLoad(loads, input = {}) {
 }
 
 /**
- * Backwards-compatible alias retained for callers written against the previous name.
- *
- * @deprecated Use `insertLoadRecord`, which says in its name that the target is not checked.
- */
-export const addLoadUnchecked = insertLoadRecord;
-
-/**
  * Replace one record's value and unit, addressed by its own id.
  *
- * The node it belongs to cannot be changed here: reassignment is a deliberate,
- * separate action, so an edit can never move a load between assets by accident.
+ * The node it belongs to cannot be changed here: `nodeId` is deliberately not copied from
+ * the patch, so an edit can never move a load between assets by accident and this
+ * operation needs no eligibility check. Moving a load is `reassignLoad()`, which does.
  *
  * @param {Array<object>} loads Current records.
  * @param {string} id Load id.
@@ -353,20 +347,95 @@ export function updateLoad(loads, id, patch = {}) {
  * Explicitly separate from `updateLoad` so that moving a load is always a
  * decision the user made, never a side effect of editing a value.
  *
+ * **This operation fails closed**, on the same terms as `addLoad()`: moving a load is one
+ * of the ways a load reaches a point, so leaving this unguarded made the eligibility rule
+ * enforceable at creation and bypassable one step later. The error codes match `addLoad()`
+ * so a caller can handle both with one branch, plus `UNKNOWN_LOAD` for a stale id.
+ *
+ * The resolver is injected rather than imported, so this module keeps no dependency on the
+ * geometry layer (see the dependency rules in `documentation/03-architecture.md`).
+ *
  * @param {Array<object>} loads Current records.
  * @param {string} id Load id.
  * @param {string} nodeId Destination node asset id.
- * @returns {{ok: true, loads: Array<object>} | {ok: false, message: string}}
+ * @param {{lookupNode?: (nodeId: string) => ({nodeType?: string} | null)}} options
+ *   Resolve an asset id to its node. Required: a target cannot be checked without it.
+ * @returns {{ok: true, loads: Array<object>, record: object}
+ *   | {ok: false, code: string, message: string}}
  */
-export function reassignLoad(loads, id, nodeId) {
+export function reassignLoad(loads, id, nodeId, options = {}) {
   const index = (loads ?? []).findIndex((load) => load.id === id);
-  if (index < 0) return { ok: false, message: 'That load is no longer in the schedule.' };
+  if (index < 0) {
+    return { ok: false, code: 'UNKNOWN_LOAD', message: 'That load is no longer in the schedule.' };
+  }
   if (!isAssetIdLike(nodeId)) {
-    return { ok: false, message: 'Choose the point this load belongs to.' };
+    return {
+      ok: false,
+      code: 'UNRESOLVED_LOAD_TARGET',
+      message: 'Choose the point this load belongs to.',
+    };
+  }
+
+  // Fail closed, exactly as `addLoad()` does. A caller that forgot the resolver has not
+  // established that the target may carry a load, so nothing is moved.
+  if (typeof options?.lookupNode !== 'function') {
+    return {
+      ok: false,
+      code: 'MISSING_NODE_RESOLVER',
+      message:
+        'A load cannot be moved without a way to look up its point. ' +
+        'Pass `lookupNode` so the point type can be checked.',
+    };
+  }
+
+  const target = options.lookupNode(nodeId);
+  if (!target) {
+    return {
+      ok: false,
+      code: 'UNRESOLVED_LOAD_TARGET',
+      message: 'That point is not in this drawing, so a load cannot be moved to it.',
+    };
+  }
+  if (isLoadEligible(target.nodeType) === false) {
+    return {
+      ok: false,
+      code: 'INELIGIBLE_LOAD_TARGET',
+      message: `A load cannot be moved to a ${target.nodeType} point. Choose a pole, an FPB or the Origin.`,
+    };
+  }
+
+  return insertReassignedLoad(loads, id, nodeId);
+}
+
+/**
+ * Rename a load's target without checking eligibility.
+ *
+ * The unguarded primitive beneath `reassignLoad()`, named so that calling it is a visible
+ * decision. It exists for restoring records whose targets were already validated, and it
+ * must not be reached from a user action. Prefer `reassignLoad()`.
+ *
+ * @param {Array<object>} loads Current records.
+ * @param {string} id Load id.
+ * @param {string} nodeId Destination node asset id.
+ * @returns {{ok: true, loads: Array<object>, record: object}
+ *   | {ok: false, code: string, message: string}}
+ */
+export function insertReassignedLoad(loads, id, nodeId) {
+  const index = (loads ?? []).findIndex((load) => load.id === id);
+  if (index < 0) {
+    return { ok: false, code: 'UNKNOWN_LOAD', message: 'That load is no longer in the schedule.' };
+  }
+  if (!isAssetIdLike(nodeId)) {
+    return {
+      ok: false,
+      code: 'UNRESOLVED_LOAD_TARGET',
+      message: 'Choose the point this load belongs to.',
+    };
   }
   const updated = [...loads];
+  // Only the target changes: the id, value and unit are carried over untouched.
   updated[index] = { ...updated[index], nodeId };
-  return { ok: true, loads: updated };
+  return { ok: true, loads: updated, record: updated[index] };
 }
 
 /**

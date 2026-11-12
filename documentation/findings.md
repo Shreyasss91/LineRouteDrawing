@@ -17,7 +17,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F7](#f7-route-entry-has-no-undo-and-no-row-reordering) | Data safety | Medium | Open — by design |
 | [F8](#f8-appjs-is-a-1590-line-controller) | Maintainability | Low | Open |
 | [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | Open |
-| [F10](#f10-a-load-on-a-tc-point-is-now-refused-by-the-model-parser-and-import-planner) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — three guarded boundaries, fail-closed, each with executable evidence |
+| [F10](#f10-a-load-cannot-reach-a-tc-point-by-creation-move-import-or-file) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — four guarded boundaries covering creation, move, import and file; fail-closed, each with executable evidence |
 
 ---
 
@@ -210,10 +210,11 @@ against obstacles, which is the most likely superlinear cost.
 **Suggested fix.** Add a scripted large-drawing timing check before claiming any scale
 limit.
 
-## F10 — A load on a TC point is now refused by the model, parser and import planner
+## F10 — A load cannot reach a TC point by creation, move, import or file
 
-**Status: closed.** Enforced at three guarded boundaries, each with its own executable
-coverage; the optional-resolver bypass is also fixed (see below).
+**Status: closed.** Enforced at four guarded boundaries, each with its own executable
+coverage; the optional-resolver bypass is fixed, and both target-*changing* operations
+are covered.
 
 **Observed originally.** A TC point is documented as not load-eligible, and
 `isLoadEligible('tc') === false` was asserted by `test/schedules.test.js` test 15 and
@@ -226,67 +227,87 @@ coverage; the optional-resolver bypass is also fixed (see below).
 - A valid serialised project with a load on `dst:r3` → `parseProjectJson` returned
   **`ok: true`** and kept the load.
 
-**A second weakness, found during review of the first fix.** The first fix made
-`lookupNode` *optional*: a caller that omitted it skipped the eligibility check entirely.
-A check that can be forgotten is not a guarantee, so the model boundary could still be
-bypassed by omission. It now fails closed — the resolver is **required**, and both a
-missing resolver and an unresolved target refuse the load (`MISSING_NODE_RESOLVER` and
-`UNRESOLVED_LOAD_TARGET` respectively), before the `INELIGIBLE_LOAD_TARGET` check for a
-resolved but ineligible point. The unguarded primitive was split out as
-`insertLoadRecord()`, named so that calling it is a visible decision; it is for
-restoring known-valid records only, and no user-reachable action calls it directly.
+**Two further weaknesses, found by auditing every operation that can change a target.**
+The first fix guarded *creation* and left *movement* open, which is the same act one step
+later, and left the import planner's own preconditions implicit. Both were reproduced:
 
-**Impact.** Low for normal use — the dropdown offered only eligible points, so the UI
-could not produce this state. It mattered because the project file is the more permissive
-interface (see [Known limitations §10](10-limitations.md#10-form-and-model-disagree-in-two-places)):
+- `reassignLoad([{id, nodeId: <pole>, value: 25, unit: 'kVA'}], id, <a TC>)`
+  → `{ok: true}`, the load on the triangle — while `addLoad()` on the same point
+  correctly returned `INELIGIBLE_LOAD_TARGET`.
+- `parseNodeLoadImport(text)` with no `context` → threw `TypeError: context.lookupNode is
+  not a function` from the middle of the row loop. Fail-closed in the sense that mattered
+  (no unverified plan existed), but a crash rather than a reportable result.
+
+**Impact.** Low for normal use — the dropdown and the reassign picker both offered only
+eligible points, so the UI could not produce this state. It mattered because the project
+file is the more permissive interface
+(see [Known limitations §10](10-limitations.md#10-form-and-model-disagree-in-two-places)):
 a hand-edited or externally generated file could place a number on a TC triangle.
 
 **Aggravating detail, now corrected.** `test/annotations.test.js` test 27 was titled *"a
 load on a TC point is refused by the data model, not placed anyway"* but asserted only
 `isLoadEligible(...) === false`. It has been retitled to say what it does
 ("the eligibility predicate excludes a TC point from carrying a load"), and the real
-model-refusal test now lives in `test/load_eligibility.test.js`.
+model-refusal tests now live in `test/load_eligibility.test.js`.
 
-**Fix.** Three guarded boundaries, distinguished in the docs so none is claimed to do
+**Fix.** Four guarded boundaries, distinguished in the docs so none is claimed to do
 another's job:
 
-1. `addLoad()` — the model operation. Fails closed: refuses with
+1. `addLoad()` — **creating** a load. Fails closed: refuses with
    `MISSING_NODE_RESOLVER` when no resolver is supplied, `UNRESOLVED_LOAD_TARGET` when
    the id resolves to nothing, and `INELIGIBLE_LOAD_TARGET` when the point cannot carry a
    load. The input list is never mutated. The panel supplies a canonicalising resolver.
-2. Project parser (`validateMeasuredData`) — refuses the whole file with
+2. `reassignLoad()` — **moving** an existing load. The same contract and the same three
+   codes, plus `UNKNOWN_LOAD` for a stale load id. Keeping the id, value and unit on a
+   successful move is pinned by test. An unguarded primitive
+   `insertReassignedLoad()` is exported for restoring already-validated records and is
+   not reachable from a user action.
+3. Project parser (`validateMeasuredData`) — refuses the whole file with
    `INELIGIBLE_LOAD_TARGET`, nothing to apply.
-3. Schedule import planner (`parseNodeLoadImport`) — refuses the row during planning,
-   before any plan exists, reported as `bad-value` with a detail naming the TC rule.
-   This is the shared planner behind both CSV import and clipboard paste.
+4. Schedule import planner (`parseNodeLoadImport`) — refuses the row during planning,
+   before any plan exists, reported as `bad-value` with a detail naming the TC rule; and
+   refuses outright with `missing-capability` if it is given neither or only one of
+   `lookupNode` and `isEligible`, because it could not verify any target. This is the
+   shared planner behind both CSV import and clipboard paste.
 
-`insertLoadRecord()` and `applyNodeLoadPlan()` are **unguarded by design** and are not
-counted as boundaries: the first is the primitive beneath `addLoad()`, the second trusts
-a plan the planner already validated.
+`insertLoadRecord()`, `insertReassignedLoad()` and `applyNodeLoadPlan()` are **unguarded
+by design** and are not counted as boundaries: the first two are the primitives beneath
+the guarded operations, the third trusts a plan the planner already validated.
+
+**Audited and left alone.** Two operations were checked and need no guard:
+
+- `updateLoad()` cannot change a load's point — `nodeId` is deliberately not taken from
+  its patch — so editing a value can never re-target a load (test 3 pins this).
+- `removeLoad()` and `removeLoadsForNode()` only remove.
 
 **A bug the new tests caught.** The first attempt resolved the target with
 `registry.nodeAsset(id)`, which only knows canonical ids, so an **aliased coordinate
 spelling** of the same TC node returned `null` and the check was silently skipped. Both
 the parser and the panel now canonicalise first (`canonicalNodeId`), and tests pin that
-the alias is refused at the model, the parser and the import planner.
+the alias is refused at the model, the parser, the reassign path and the import planner.
 
-**Import-planner coverage.** The import path now has its own test (test 8) that drives
+**Import-planner coverage.** The import path has its own test (test 8) that drives
 `parseNodeLoadImport` with real delimited text and a canonicalising resolver — the same
 function CSV import and clipboard paste share — rather than hand-building a plan. A
 separate test (test 9) pins that an aliased spelling is refused for *ineligibility*, not
-for being unrecognised.
+for being unrecognised, and test 19 pins the fail-closed capability requirements.
 
 **Compatibility.** A saved file that already contains a TC load is now refused with a
 clear message naming the record and the point. Parsing is all-or-nothing, so nothing is
 half-applied, and the recovery/overwrite protections are unchanged — the stored project
 is not touched automatically. No schema migration was needed: the schema did not change,
-only which documents are accepted.
+only which documents are accepted. `reassignLoad()` gained an options argument; its one
+caller is the panel's orphan picker, which was updated, and the resulting error is
+surfaced through the existing `notify()` path.
 
-**Deliberately unchanged.** `reassignLoad(loads, id, nodeId)` still has no registry
-argument, so it cannot resolve a node type; its guard remains the UI picker, which
-filters by `isLoadEligible`. Adding a parameter would change a settled API. An **orphan**
-load (pointing at a node the drawing no longer has) is still kept and warned about, not
-refused — that remains the user's data to reassign.
+**Deliberately unchanged.** An **orphan** load (pointing at a node the drawing no longer
+has) is still kept and warned about, not refused — that remains the user's data to
+reassign, and `reassignLoad()` is the supported way to place it on a live eligible point.
+
+The `addLoadUnchecked` alias added earlier in this work was **removed**: it was introduced
+as a "backwards-compatible" alias for a symbol that never existed in the previous public
+API (confirmed with `git log -S`), and it had no consumer. `insertLoadRecord()` remains
+the single explicitly named unguarded primitive.
 
 ---
 

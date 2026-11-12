@@ -259,22 +259,26 @@ Form: `#field-load-node` (Point), `#field-load-value`, `#field-load-unit`
 
 - **Eligible points:** `pole`, `fpb`, `origin` (`LOAD_ELIGIBLE_TYPES` / `isLoadEligible()`
   in [src/data/schedules.js](../src/data/schedules.js)). A **TC point is not eligible**.
-- The rule is enforced at three *guarded* boundaries, each with its own error:
+- The rule is enforced at four *guarded* boundaries, each with its own error:
 
   | Boundary | What it does | Error |
   | --- | --- | --- |
-  | `addLoad()` — the model operation | fails closed: refuses when no `lookupNode` resolver is supplied, when the id resolves to nothing, and when the point cannot carry a load | `MISSING_NODE_RESOLVER`, `UNRESOLVED_LOAD_TARGET`, `INELIGIBLE_LOAD_TARGET` |
+  | `addLoad()` — creating a load | fails closed: refuses when no `lookupNode` resolver is supplied, when the id resolves to nothing, and when the point cannot carry a load | `MISSING_NODE_RESOLVER`, `UNRESOLVED_LOAD_TARGET`, `INELIGIBLE_LOAD_TARGET` |
+  | `reassignLoad()` — moving an existing load | same contract as `addLoad()`, because moving a load is the other way one reaches a point; adds `UNKNOWN_LOAD` for a stale record id | `MISSING_NODE_RESOLVER`, `UNRESOLVED_LOAD_TARGET`, `INELIGIBLE_LOAD_TARGET`, `UNKNOWN_LOAD` |
   | Project parser (`validateMeasuredData`) | refuses the whole file | `INELIGIBLE_LOAD_TARGET` |
-  | Schedule import planner (`parseNodeLoadImport`) | refuses the row during planning, before any plan exists | `bad-value` with a detail naming the TC rule |
+  | Schedule import planner (`parseNodeLoadImport`) | refuses the row during planning, before any plan exists; also refuses outright if it is not given both `lookupNode` and `isEligible`, since it could not verify anything | `bad-value` with a detail naming the TC rule; `missing-capability` for absent dependencies |
 
-- All three resolve the target through the asset registry, so an aliased coordinate
+- All four resolve the target through the asset registry, so an aliased coordinate
   spelling is judged by what it resolves to.
-- `insertLoadRecord()` is the **unguarded** primitive beneath `addLoad()`. It does not
-  check eligibility and is only for callers that already know the target is valid. No
-  user-reachable action calls it directly.
+- `insertLoadRecord()` and `insertReassignedLoad()` are the **unguarded** primitives
+  beneath `addLoad()` and `reassignLoad()`. They do not check eligibility and are only
+  for callers that already know the target is valid. No user-reachable action calls them
+  directly.
 - Similarly, `applyNodeLoadPlan()` is a pure applier that trusts a plan already validated
-  by the planner. It is not a fourth boundary.
-- `test/load_eligibility.test.js` (14 tests) covers all three guarded boundaries
+  by the planner. It is not a fifth boundary.
+- `updateLoad()` **cannot** change a load's point: `nodeId` is deliberately not taken
+  from its patch, so editing a value never needs an eligibility check.
+- `test/load_eligibility.test.js` (19 tests) covers all four guarded boundaries
   including the fail-closed cases; `test/schedules.test.js` test 15 and
   `test/annotations.test.js` test 27 pin the predicate itself.
 - **Value:** must be a finite number `> 0`. Zero is refused rather than treated as
@@ -290,8 +294,10 @@ input — editing it keeps the record's identity), Unit, actions.
 
 - **Remove** deletes that one record.
 - **Reassign** appears only on an unresolved row: it prompts with a numbered list of
-  eligible points and moves the record, keeping its id and value
-  (`reassignLoad()`).
+  eligible points and moves the record, keeping its id, value and unit
+  (`reassignLoad()`). The list is filtered by `isLoadEligible`, and `reassignLoad()`
+  itself refuses a TC target, so neither the picker nor the model can move a load onto a
+  test point.
 - A record whose point no longer exists is shown in the table as
   `— (missing)` with `is-unresolved` styling.
 

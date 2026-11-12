@@ -27,7 +27,12 @@ import test from 'node:test';
 
 import { buildAssetRegistry } from '../src/geometry/assets.js';
 import { buildNetwork } from '../src/geometry/network.js';
-import { addLoad, isLoadEligible } from '../src/data/schedules.js';
+import {
+  addLoad,
+  insertLoadRecord,
+  isLoadEligible,
+  reassignLoad,
+} from '../src/data/schedules.js';
 import { parseProjectJson, serializeProjectJson } from '../src/ui/project.js';
 import { applyNodeLoadPlan, parseNodeLoadImport } from '../src/data/schedule_io.js';
 
@@ -353,4 +358,132 @@ test('14. the model fails closed when the resolver cannot resolve the target', (
     lookupNode: f.lookupNode,
   });
   assert.equal(resolved.ok, true);
+});
+
+/* ---------------------------------------------------------------------------
+ * Reassignment is the other way a load reaches a point.
+ *
+ * `addLoad()` was the obvious way to create this invalid state, but moving an existing
+ * load is the same act one step later, and it was reproduced accepting a TC target:
+ *
+ *   reassignLoad([{ id, nodeId: <a pole>, value: 25, unit: 'kVA' }], id, <a TC>)
+ *     -> { ok: true }, the load was on the triangle
+ *
+ * Guarding creation but not movement would have made the rule enforceable on one path
+ * and bypassable on the other, so the guard and its error codes match `addLoad()`.
+ * ------------------------------------------------------------------------- */
+
+test('15. a load cannot be moved onto a TC point', () => {
+  const f = fixture();
+  const seeded = insertLoadRecord([], { nodeId: f.pole.id, value: 25, unit: 'kVA' }).loads;
+  const moved = reassignLoad(seeded, seeded[0].id, f.tc.id, { lookupNode: f.lookupNode });
+
+  assert.equal(moved.ok, false, 'moving onto a TC is refused');
+  assert.equal(moved.code, 'INELIGIBLE_LOAD_TARGET');
+  assert.equal(moved.loads, undefined, 'no replacement list is offered');
+
+  // An alias of the same TC must be refused for ineligibility too, not waved through
+  // because the resolver was handed a spelling it did not recognise.
+  const aliased = reassignLoad(seeded, seeded[0].id, f.tc.coordKey, { lookupNode: f.lookupNode });
+  assert.equal(aliased.ok, false, 'a coordinate spelling of the TC is also refused');
+  assert.equal(aliased.code, 'INELIGIBLE_LOAD_TARGET');
+});
+
+test('16. a rejected reassignment leaves the input untouched', () => {
+  const f = fixture();
+  const seeded = insertLoadRecord([], { nodeId: f.pole.id, value: 25, unit: 'kVA' }).loads;
+  const snapshot = JSON.stringify(seeded);
+
+  const rejected = reassignLoad(seeded, seeded[0].id, f.tc.id, { lookupNode: f.lookupNode });
+  assert.equal(rejected.ok, false);
+  assert.equal(JSON.stringify(seeded), snapshot, 'the caller still holds the original list');
+  assert.equal(seeded[0].nodeId, f.pole.id, 'the load is still on the pole');
+});
+
+test('17. reassignment to an eligible point keeps the record intact', () => {
+  const f = fixture();
+  const seeded = insertLoadRecord([], { nodeId: f.pole.id, value: 25, unit: 'kVA' }).loads;
+  const before = seeded[0];
+
+  for (const target of [f.origin, f.fpb]) {
+    const moved = reassignLoad(seeded, before.id, target.id, { lookupNode: f.lookupNode });
+    assert.equal(moved.ok, true, `moving to a ${target.nodeType} is allowed`);
+    assert.equal(moved.loads[0].nodeId, target.id);
+    assert.equal(moved.loads[0].id, before.id, 'the id is preserved');
+    assert.equal(moved.loads[0].value, 25, 'the value is preserved');
+    assert.equal(moved.loads[0].unit, 'kVA', 'the unit is preserved');
+  }
+});
+
+test('18. reassignment fails closed without a usable resolver', () => {
+  const f = fixture();
+  const seeded = insertLoadRecord([], { nodeId: f.pole.id, value: 25, unit: 'kVA' }).loads;
+  const id = seeded[0].id;
+
+  for (const options of [undefined, {}, { lookupNode: null }, { lookupNode: 'nope' }]) {
+    const result = reassignLoad(seeded, id, f.pole.id, options);
+    assert.equal(result.ok, false, `refused for ${JSON.stringify(options)}`);
+    assert.equal(result.code, 'MISSING_NODE_RESOLVER');
+    assert.equal(result.loads, undefined);
+  }
+
+  // A resolver that names no point cannot prove eligibility either.
+  const unresolved = reassignLoad(seeded, id, f.pole.id, { lookupNode: () => null });
+  assert.equal(unresolved.ok, false);
+  assert.equal(unresolved.code, 'UNRESOLVED_LOAD_TARGET');
+
+  // A stale load id is its own failure, not an eligibility question.
+  const stale = reassignLoad(seeded, 'load-999', f.pole.id, { lookupNode: f.lookupNode });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.code, 'UNKNOWN_LOAD');
+});
+
+/* ---------------------------------------------------------------------------
+ * The import planner needs both capabilities to verify a target.
+ *
+ * It already refused to produce a plan without them, but by throwing a TypeError from
+ * the middle of a row loop - a crash rather than a validation result a caller can show.
+ * That is fail-closed in the sense that mattered (no unverified plan existed), and these
+ * tests keep it that way while making the failure reportable.
+ * ------------------------------------------------------------------------- */
+
+test('19. the import planner refuses when it cannot check a target', () => {
+  const text = 'nodeId,value,unit\ndst:route-1,25,kVA\n';
+  const f = fixture();
+
+  // Neither capability: nothing can be verified.
+  const none = parseNodeLoadImport(text, {});
+  assert.equal(none.ok, false);
+  assert.equal(none.code, 'missing-capability');
+  assert.equal(none.plan, undefined, 'no plan is produced');
+
+  // A lookup without the eligibility rule can resolve a point but cannot judge it.
+  const noRule = parseNodeLoadImport(text, { lookupNode: f.lookupNode });
+  assert.equal(noRule.ok, false);
+  assert.equal(noRule.code, 'missing-capability');
+  assert.equal(noRule.plan, undefined);
+
+  // The rule without a lookup cannot reach the point it would judge.
+  const noLookup = parseNodeLoadImport(text, { isEligible: isLoadEligible });
+  assert.equal(noLookup.ok, false);
+  assert.equal(noLookup.code, 'missing-capability');
+  assert.equal(noLookup.plan, undefined);
+
+  // With both, the same text plans normally - so the guard is not an over-refusal.
+  const verified = parseNodeLoadImport(text, {
+    loads: [],
+    lookupNode: f.lookupNode,
+    isEligible: isLoadEligible,
+  });
+  assert.equal(verified.ok, true, 'a valid import still plans');
+
+  // And with both, a TC target is still refused, which is the property that matters.
+  const tcRow = `nodeId,value,unit\n${f.tc.id},25,kVA\n`;
+  const refused = parseNodeLoadImport(tcRow, {
+    loads: [],
+    lookupNode: f.lookupNode,
+    isEligible: isLoadEligible,
+  });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.plan, undefined);
 });

@@ -15,6 +15,62 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ## Unreleased
 
+### Fixed
+
+- **`reassignLoad()` could move a load onto a TC point.** Guarding creation but not
+  movement enforced the rule on one path and left it bypassable on the other, one step
+  later. Reproduced:
+
+  ```
+  reassignLoad([{ id, nodeId: <a pole>, value: 25, unit: 'kVA' }], id, <a TC>)
+    -> { ok: true }, load on the triangle
+  ```
+
+  It now fails closed with the same codes as `addLoad()` — `MISSING_NODE_RESOLVER`,
+  `UNRESOLVED_LOAD_TARGET`, `INELIGIBLE_LOAD_TARGET` — plus `UNKNOWN_LOAD` for a stale
+  record id. A rejected move leaves the input list untouched; a successful one keeps the
+  record's id, value and unit. The unguarded primitive is exported separately as
+  `insertReassignedLoad()`, for restoring already-validated records, and is not reachable
+  from any user action. The panel's orphan picker passes the canonicalising `lookupNode`
+  it already had.
+- **The import planner threw a `TypeError` instead of reporting when it could not verify a
+  target.** `parseNodeLoadImport()` read `context.lookupNode` and `context.isEligible`
+  without checking they existed, so a caller missing either crashed mid-row. It produced
+  no unverified plan, but a crash is not a result the caller can show. It now returns
+  `missing-capability` up front. `context.loads` was likewise read unconditionally and
+  now defaults to an empty list.
+
+### Removed
+
+- `addLoadUnchecked`, an alias I introduced in `f1948a9` as "backwards compatible" for a
+  symbol that never existed in the previous public API (confirmed with `git log -S`) and
+  that had no consumer. `insertLoadRecord()` remains the single explicitly named
+  unguarded primitive.
+
+### Added
+
+- `test/load_eligibility.test.js` grown from 14 to 19 tests: refusing a direct move to a
+  TC point and to its coordinate-spelling alias, no mutation on a rejected move, eligible
+  re-targets preserving id/value/unit, failing closed without a usable resolver (including
+  `null`, a string and a stale id), and the planner's capability requirements.
+
+### Audited, unchanged
+
+- `updateLoad()` cannot change a load's point — `nodeId` is not taken from its patch — so
+  editing a value needs no eligibility check.
+- `removeLoad()` / `removeLoadsForNode()` only remove.
+- The UI reassign picker already filtered by `isLoadEligible`; it is now the second of two
+  guards rather than the only one.
+- An orphan load is still kept and warned about rather than refused.
+
+### Validation
+
+- `npm test` → 477 tests, 477 pass, 0 fail (was 472).
+- `npm run test:browser` → 230/230 checks passed.
+- Mutation evidence, each reverted and re-verified: removing the `reassignLoad()` guard
+  fails tests 15, 16 and 18; removing the planner's capability guard fails test 19.
+- No schema change, no migration, no change to rendering, export or the project format.
+
 ### Changed
 
 - **Browser §5 (route editing) strengthened from 23 to 32 checks.** The load now attaches

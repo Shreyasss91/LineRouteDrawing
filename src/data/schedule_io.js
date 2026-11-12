@@ -306,6 +306,7 @@ export const IMPORT_ERRORS = Object.freeze({
   BAD_VALUE: 'bad-value',
   BAD_UNIT: 'bad-unit',
   BAD_NODE_TYPE: 'bad-node-type',
+  MISSING_CAPABILITY: 'missing-capability',
 });
 
 function importFail(code, message, details = []) {
@@ -345,6 +346,17 @@ export function detectDelimiter(text) {
  * @returns {{ok: true, plan: object} | {ok: false, code: string, message: string, details: string[]}}
  */
 export function parseNodeLoadImport(text, context) {
+  // Fail closed on a missing capability. The planner cannot verify a target without both
+  // functions, and throwing a TypeError at some middle row would be a crash rather than a
+  // validation result the caller can show. This is a caller error, not bad user text.
+  if (typeof context?.lookupNode !== 'function' || typeof context?.isEligible !== 'function') {
+    return importFail(
+      IMPORT_ERRORS.MISSING_CAPABILITY,
+      'The schedule cannot be imported because the drawing is not ready to check it. ' +
+        'Nothing has been changed.',
+    );
+  }
+
   const rows = parseDelimited(text, detectDelimiter(text));
   if (rows.length === 0) {
     return importFail(IMPORT_ERRORS.EMPTY, 'There is nothing to import: the text is empty.');
@@ -437,7 +449,12 @@ export function parseNodeLoadImport(text, context) {
     );
   }
 
-  return { ok: true, plan: planLoadImport(records, context.loads, context.mode ?? 'replace', unresolved) };
+  return {
+    ok: true,
+    // `loads` is the schedule the import is compared against. An absent one means there
+    // is nothing to compare, so an empty list is the honest reading rather than a crash.
+    plan: planLoadImport(records, context.loads ?? [], context.mode ?? 'replace', unresolved),
+  };
 }
 
 /**
