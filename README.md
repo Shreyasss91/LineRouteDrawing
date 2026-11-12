@@ -26,6 +26,7 @@ The full documentation set lives in [`documentation/`](documentation/README.md):
 | [Feature and validation matrix](documentation/09-feature-matrix.md) | Every capability with its verification status |
 | [Known limitations](documentation/10-limitations.md) | What it cannot do, and what has not been validated |
 | [Findings](documentation/findings.md) | Defects and gaps recorded but deliberately not fixed |
+| [Changelog](CHANGELOG.md) | Every change, however small, with the commit that carried it |
 
 This README is the short version and remains the quickest way in.
 

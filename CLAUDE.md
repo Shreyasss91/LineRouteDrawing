@@ -57,9 +57,10 @@ src/data/             schedules and CSV/TSV transfer: NO DOM
 src/render/           scene -> SVG / PDF / print fit: NO DOM
 src/ui/               state, controller, schedules panel, persistence
 scripts/              serve.js, test-browser.mjs, print-dialog-smoke.mjs
-test/                 29 node:test files
+test/                 30 node:test files
 vendor/jspdf/         jsPDF 4.2.1 (MIT), vendored and pinned
 documentation/        the documentation set
+CHANGELOG.md          every change, however small — mandatory
 ```
 
 ## Architecture rules — these are load-bearing
@@ -163,6 +164,63 @@ destination draws two boxes both labelled `FPB`.
   that way.
 - Do not say something is fixed until you have run the test that proves it, and state
   plainly what you checked and what you did not.
+
+### Related documents must be updated **before** the commit
+
+A commit is not ready until the documents it affects are already correct **in the same
+commit**. Do not leave documentation for "later" — a follow-up docs commit is how a
+repository ends up documenting behaviour it no longer has.
+
+Which documents, by what you touched:
+
+| If you changed | Update |
+| --- | --- |
+| `src/geometry/**`, `src/render/**`, the scene | [04-route-and-geometry](documentation/04-route-and-geometry.md), [07-rendering-and-export](documentation/07-rendering-and-export.md) |
+| project format, validation, refusal codes, storage | [05-persistence](documentation/05-persistence.md) — including the **refusal-code table** |
+| designations, asset ids, loads, lengths | [06-identity-and-data](documentation/06-identity-and-data.md) |
+| UI behaviour, controls, form limits | [02-user-guide](documentation/02-user-guide.md) |
+| any test or the test count | [08-testing](documentation/08-testing.md) (inventory + counts), [README](README.md), `CLAUDE.md` |
+| which behaviours are proven | [09-feature-matrix](documentation/09-feature-matrix.md) — and keep the status words honest |
+| closing or opening a defect | [documentation/findings.md](documentation/findings.md) — update the index row *and* the section |
+| anything a reader of the app would notice | `README.md` known limitations |
+
+Then check before committing:
+
+1. **Counts are re-derived, not remembered.** Run `npm test` and
+   `npm run test:browser` and use the numbers printed. Test counts and browser-section
+   numbers appear in at least five files and drift silently.
+2. **Browser-section numbers are remapped.** Inserting a section shifts every later
+   number, and the feature matrix cites sections by number.
+3. **Every doc link and heading anchor still resolves.** A retitled heading breaks
+   anchor links of the form `file.md#heading-slug`.
+4. **`CHANGELOG.md` has an entry** — see below.
+
+### CHANGELOG is mandatory
+
+**Every change, however small, gets an entry in [CHANGELOG.md](CHANGELOG.md).** There is
+no size threshold and no category that is exempt.
+
+"However small" explicitly includes, because these are the ones people skip:
+
+- a one-word wording fix, a typo, a corrected number
+- a comment or JSDoc change
+- a renamed test, or a test whose assertion changed meaning
+- a documentation-only change, a link fix, a reordered table
+- a dependency bump, a `.gitignore` line, a formatting pass
+- a refactor with no behaviour change
+
+Rules for an entry:
+
+- **Write it in the same commit as the change.** It is part of the change, not a
+  follow-up.
+- **Name the commit hash** so the entry traces to the diff.
+- **Use the Keep a Changelog sections**: Added / Changed / Deprecated / Removed / Fixed /
+  Security. An entry that only edits a comment is still `Changed`.
+- **Say whether `src/` was touched.** "No implementation change" is a meaningful result
+  and prevents a reader assuming behaviour moved.
+- **Record behaviour changes under Compatibility** when an existing file, project or API
+  behaves differently afterwards — including "no schema change, no migration needed".
+- **Never delete or rewrite an entry** once committed. Correct it by adding a new one.
 
 ## Known gaps
 

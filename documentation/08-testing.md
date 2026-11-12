@@ -256,6 +256,22 @@ These are the invariants the test suite and the module boundaries depend on
 10. **Never reissue a name.** A new designation must come from the allocator fed with
     the stored table.
 
+### Before you commit
+
+A commit is only ready when the documents it affects are already correct **in the same
+commit**, and when [CHANGELOG.md](../CHANGELOG.md) has an entry. Both rules are stated in
+full in [CLAUDE.md](../CLAUDE.md#related-documents-must-be-updated-before-the-commit).
+
+The short version:
+
+1. Run `npm test` and `npm run test:browser`, and use the counts they print. Test counts
+   and browser-section numbers live in several files at once and drift silently.
+2. If you added a browser section, **remap every later section number** — the feature
+   matrix cites them by number.
+3. If you retitled a heading, fix any anchor links to it (the slug changes with the heading text).
+4. Add the changelog entry, naming the commit. Every change counts, including a comment,
+   a typo, a renamed test or a documentation-only edit.
+
 ## 10. Manual validation
 
 Automated coverage has limits. These are checked by hand and the result recorded here:

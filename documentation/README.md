@@ -31,6 +31,7 @@ npm run test:browser   →  221/221 browser checks passed (12 sections)
 | 9 | [Feature and validation matrix](09-feature-matrix.md) | check whether something is verified, partial, or unsupported |
 | 10 | [Known limitations](10-limitations.md) | know what the tool cannot do, and what has not been validated |
 | — | [Findings](findings.md) | see defects and gaps recorded but deliberately **not** fixed |
+| — | [Changelog](../CHANGELOG.md) | see what changed, when, and in which commit |
 
 ## Suggested reading paths
 
