@@ -174,6 +174,30 @@ function miniDesignations(page) {
   return page.locator('#mini-preview #point-designations text').allTextContents();
 }
 
+/** The whole saved project payload, as the app persists it. */
+function readSavedProject(page) {
+  return page.evaluate(() => {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key || !key.includes('line-route')) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      return JSON.parse(raw).project ?? null;
+    }
+    return null;
+  });
+}
+
+/** The route table as the user sees it: id, source, direction, spans. */
+function readRouteRows(page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('#route-rows tr')].map((tr) => ({
+      id: tr.dataset.id,
+      cells: [...tr.querySelectorAll('td')].map((td) => td.textContent.trim()),
+    })),
+  );
+}
+
 /** Add a route through the form and wait for the drawing to settle. */
 async function addRoute(page, { from, direction, spans, tc = false, fpb = false }) {
   await page.selectOption('#field-from', from);
@@ -470,6 +494,164 @@ try {
   }
   const ringAfterPole = await page.locator('#mini-preview #mini-selection *').count();
   check('clicking a pole in the drawing highlights the reference', ringAfterPole > 0, `${ringAfterPole} marks`);
+
+  /* ---------------- Editing an existing route ---------------- */
+
+  section('Editing an existing route');
+
+  // Route editing was the one user interaction with no browser coverage: the suite
+  // built routes and deleted them but never opened the edit form, so the replacement
+  // path that preserves a route's id - and therefore everything keyed to its
+  // endpoints - was untested in a real DOM.
+  //
+  // Start from a clean project with three routes so a fourth can be added, edited and
+  // compared against its neighbours. Route 2 starts at A and runs East; flipping it to
+  // West is the direction change used below because it keeps every node id, label and
+  // designation identical (checked against the real engine), so a failure here means
+  // the edit path broke identity rather than the drawing legitimately changing shape.
+  await fresh(page, base);
+  // An empty project boots with the bundled example loaded, so start from nothing.
+  await page.click('#btn-clear');
+  await page.waitForTimeout(250);
+  await addRoute(page, { from: 'origin', direction: 'south', spans: 2 });
+  await addRoute(page, { from: 'endpoint:A', direction: 'east', spans: 2 });
+  await addRoute(page, { from: 'endpoint:A', direction: 'south', spans: 3 });
+
+  const rowsBefore = await readRouteRows(page);
+  check('the edit fixture has three routes', rowsBefore.length === 3, `${rowsBefore.length} rows`);
+
+  // A load on point A, which is the endpoint shared by routes 2 and 3 and the source
+  // of the route being edited. If the edit re-created the endpoint under a new id the
+  // load would go unresolved, which is exactly the regression this guards.
+  const nodeAOption = await page.evaluate(() => {
+    const options = [...document.querySelectorAll('#field-load-node option')].map((o) => ({
+      value: o.value,
+      text: o.textContent.trim(),
+    }));
+    // Options read `<designation> (<asset id>)`. Point A is the first route's
+    // destination, and its designation is exactly `A`, so match that prefix rather
+    // than guessing the id - ids in this session continue the counter from earlier
+    // sections and are not `route-1`.
+    const a = options.find((o) => /^A \(/.test(o.text));
+    return a ? a.value : null;
+  });
+  check('point A is offered as a load target', Boolean(nodeAOption), String(nodeAOption));
+  await addLoad(page, { nodeId: nodeAOption, value: 25, unit: 'kVA' });
+
+  const savedBefore = await readSavedProject(page);
+  const editedId = rowsBefore[1].id;
+  const neighbourId = rowsBefore[2].id;
+  check(
+    'the edited route has a stable id before the edit',
+    typeof editedId === 'string' && editedId.length > 0,
+    editedId,
+  );
+  check(
+    'the load is recorded against point A',
+    savedBefore?.loads?.length === 1 && savedBefore.loads[0].nodeId === nodeAOption,
+    JSON.stringify(savedBefore?.loads),
+  );
+  const designationsBefore = await readDesignationMap(page);
+
+  // Open the edit form for the second route through the row's own Edit button.
+  await page.locator('#route-rows tr').nth(1).locator('button[data-action="edit"]').click();
+  await page.waitForTimeout(250);
+  const formShowsEdit = await page.locator('#btn-save-route').textContent();
+  check('opening edit switches the form to save mode', /Save changes/.test(formShowsEdit), formShowsEdit);
+  const cancelVisible = await page.locator('#btn-cancel-edit').isVisible();
+  check('the cancel-edit button appears while editing', cancelVisible);
+
+  // Change the direction and save through the real form.
+  await page.selectOption('#field-direction', 'west');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(450);
+
+  const rowsAfter = await readRouteRows(page);
+  check('the edit did not add or remove a route', rowsAfter.length === 3, `${rowsAfter.length} rows`);
+  check(
+    'the edited route kept its stable id',
+    rowsAfter[1].id === editedId,
+    `${editedId} -> ${rowsAfter[1].id}`,
+  );
+  check(
+    'the edit changed the direction that was edited',
+    rowsAfter[1].cells.some((c) => /west/i.test(c)),
+    rowsAfter[1].cells.join(' | '),
+  );
+  check(
+    'the neighbouring route is untouched',
+    rowsAfter[2].id === neighbourId &&
+      rowsAfter[2].cells.join('|') === rowsBefore[2].cells.join('|'),
+    rowsAfter[2].cells.join(' | '),
+  );
+  check(
+    'the unrelated first route is untouched',
+    rowsAfter[0].id === rowsBefore[0].id &&
+      rowsAfter[0].cells.join('|') === rowsBefore[0].cells.join('|'),
+  );
+  check('the form returned to add mode', /Add route/.test(await page.locator('#btn-save-route').textContent()));
+  check('the cancel-edit button is hidden again', !(await page.locator('#btn-cancel-edit').isVisible()));
+
+  // The persisted project is the authoritative after-state: the route id is kept, the
+  // direction is the new one, and the load still points at the same live endpoint.
+  const savedAfter = await readSavedProject(page);
+  check('the project still has three routes', savedAfter?.routes?.length === 3, `${savedAfter?.routes?.length}`);
+  check(
+    'the saved route kept its id and gained the new direction',
+    savedAfter?.routes?.[1]?.id === editedId && savedAfter.routes[1].direction === 'west',
+    JSON.stringify(savedAfter?.routes?.[1]),
+  );
+  const loadAfter = savedAfter?.loads?.[0];
+  check(
+    'the load is still recorded on the same endpoint id',
+    savedAfter?.loads?.length === 1 && loadAfter.nodeId === nodeAOption,
+    JSON.stringify(loadAfter),
+  );
+
+  // The load must still resolve to a drawn callout, not appear in the unresolved list.
+  await page.click('#tab-loads');
+  await page.waitForTimeout(200);
+  const unresolvedAfter = await page.locator('#unresolved-bar:not([hidden])').count();
+  check('the load did not become unresolved', unresolvedAfter === 0, `${unresolvedAfter} banners`);
+  const calloutAfter = await page.locator('#preview-canvas g[id^="callout:"]').count();
+  check('the load is still drawn as a callout', calloutAfter === 1, `${calloutAfter} callouts`);
+  const calloutTextAfter = await page
+    .locator('#preview-canvas g[id^="callout:"]')
+    .first()
+    .textContent();
+  check('the callout still reads 25 kVA', /25 kVA/.test(calloutTextAfter ?? ''), String(calloutTextAfter).trim());
+
+  // Designations are carried, not re-derived: every point belonging to this
+  // fixture's routes holds the same name after the edit. Scoped to the fixture's own
+  // routes because the stored table still carries entries from earlier sections.
+  const designationsAfter = await readDesignationMap(page);
+  const fixtureIdsBefore = Object.keys(designationsBefore ?? {}).filter((k) =>
+    /^(origin|dst:route-1[012]|endpoint:|mid:route-1[012]:)/.test(k),
+  );
+  check('the fixture has designations to compare', fixtureIdsBefore.length >= 5, `${fixtureIdsBefore.length}`);
+  check(
+    'every point of the edited and neighbouring routes kept its designation',
+    fixtureIdsBefore.every((k) =>
+      k.startsWith('endpoint:') || designationsAfter?.[k] === designationsBefore[k],
+    ),
+    JSON.stringify(
+      fixtureIdsBefore.map((k) => [k, designationsBefore[k], designationsAfter?.[k]]),
+    ),
+  );
+
+  // A reload must show what the edit produced, so the drawing and the file agree.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg', { timeout: 15000 });
+  const rowsAfterReload = await readRouteRows(page);
+  check(
+    'the edit survives a reload with its id intact',
+    rowsAfterReload.length === 3 && rowsAfterReload[1].id === editedId,
+    JSON.stringify(rowsAfterReload.map((r) => r.id)),
+  );
+  check(
+    'the reloaded drawing still shows the load',
+    (await page.locator('#preview-canvas g[id^="callout:"]').count()) === 1,
+  );
 
   /* ---------------- Dragging a callout ---------------- */
 

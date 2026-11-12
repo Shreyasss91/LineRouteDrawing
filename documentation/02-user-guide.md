@@ -128,6 +128,30 @@ The route table (`#route-rows`) has one row per instruction with columns
   (`#btn-cancel-edit`) appears.
 - **Save changes** replaces the row in place, keeping its id. Every later route is
   re-evaluated by the normal rebuild.
+
+### What an edit preserves
+
+Because the row is replaced by spreading into the existing object
+(`{ ...route, ...changes }`), the route's `id` is **preserved**, and that is what makes an
+edit safe to perform:
+
+- Endpoint asset ids are derived from the route id (`dst:route-N`), so a load, span
+  length or designation attached to an endpoint of the edited route stays attached.
+- Point designations are carried, not re-derived, so nothing is renumbered.
+- Other rows are untouched; their ids, sources and designations do not change.
+- The result is persisted immediately, so a reload shows the edited state.
+
+This is verified in a real browser by the **Editing an existing route** section of
+`npm run test:browser` (§5 of the browser suite): it records a load on the endpoint the
+edited route starts from, flips the direction, saves through the form, and asserts the
+id, the load, the neighbouring rows, the designations and a reload
+([findings F2](findings.md#f2-an-edited-route-is-now-covered-by-a-browser-test)).
+
+One caveat about the *topology* rather than the identity: a direction change can
+legitimately alter the drawing. If the new direction runs through an existing point, the
+route now ends somewhere else and downstream rows may become invalid (they are kept and
+marked `Invalid`, never dropped). Editing the direction is not guaranteed to keep the
+shape of the network, only the identity of the row being edited.
 - **Delete** removes the row (`state.routes.splice`) and rebuilds. Later rows that
   depended on it are **kept** and marked invalid, not silently dropped.
 - **Status** is `Valid` or `Invalid`; invalid rows get `.is-invalid` styling and the

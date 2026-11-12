@@ -33,7 +33,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Complete overlap (same path either way) | Verified | `geometry.test.js`, `designations.test.js` | One physical span, one length |
 | Perpendicular crossings become junctions | Verified | `geometry.test.js` test 9 ("intersecting routes become connected junctions") | No junction **symbol** is drawn (all profiles set `showJunctionMarkers:false`) |
 | Zero-length span rejected | Verified | `network.js` `ERROR_CODES.ZERO_LENGTH`; `geometry.test.js` | Not reachable from the UI (unit steps only) |
-| Editing a row in place | **Incomplete validation** | `app.js` `startEdit()` / `handleSubmit()`; no automated test | Exercised only by hand in the browser; no unit test covers `startEdit()` |
+| Editing a row in place | Verified | Browser §5 (22 checks): the edit form opens, a direction change saves with the route `id` preserved in the table **and** the saved file, a load on the shared endpoint stays resolved and drawn, neighbours are untouched, designations carried, state survives a reload | `startEdit()`/`handleSubmit()` have no *unit* test; coverage is browser-level. The direction change in the test is East → West, chosen because it preserves every node id |
 | Deleting a route leaves later identities stable | Verified | `route_identity.test.js` test 7, test 8 ("deleting a route leaves every other identity stable") | Deleting the **route** is the tested unit; deleting a row via the UI button is the same `state.routes.splice` path |
 | Deleting a branch leaves its records unresolved, not reassigned | Verified | `reconcile.test.js` tests 1, 4, 6, 7 | — |
 | Invalid rows are never dropped | Verified | `geometry.test.js` (forward reference and broken chain), `reconcile.test.js` test 7 | — |
@@ -45,7 +45,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Feature | Status | Evidence | Limits |
 | --- | --- | --- | --- |
 | Pole drawn as an X | Verified | `render.test.js` | — |
-| TC drawn as a triangle | Verified | `tc_anchor.test.js`, `fpb.test.js`, `browser` §10 | — |
+| TC drawn as a triangle | Verified | `tc_anchor.test.js`, `fpb.test.js`, `browser` §11 | — |
 | FPB drawn as a box with `FPB` inside | Verified | `fpb.test.js`, `browser` | — |
 | A marker replaces the X | Verified | `fpb.test.js`, `browser` | — |
 | TC anchored on its downstream base midpoint | Verified | `tc_anchor.test.js` (12 tests) | — |
@@ -100,8 +100,8 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Automatic callout and label placement | Verified | `annotations.test.js` (37 tests) | Candidate scoring, not global optimisation |
 | Collision avoidance | Verified | `annotations.test.js`, `collide.js` tests | Box/segment tests |
 | Leader line and arrowhead | Verified | `annotations.test.js` | — |
-| Drag to move an annotation | Verified | `browser` §5 "a callout can be dragged" | — |
-| Drag stored as an offset, follows its pole | Verified | `browser` §5 "the dragged position survives a reload" | — |
+| Drag to move an annotation | Verified | `browser` §6 "a callout can be dragged" | — |
+| Drag stored as an offset, follows its pole | Verified | `browser` §6 "the dragged position survives a reload" | — |
 | Drag scaled by zoom | **Incomplete validation** | Implemented in `app.js` ("Scene-space position at the moment the drag began, so zoom never bends the move"); no automated check | The browser suite drags only at fit zoom |
 | A click of no travel is not recorded | **Incomplete validation** | Implemented (a drag under half a pixel is discarded); no automated check | — |
 | Annotations identical in preview and export | Verified | `annotation_layer.js` `labelSlots` + browser PDF/print sections | Same unpadded frame |
@@ -130,11 +130,11 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | CSV export, node loads | Verified | `schedule_io.test.js` (31 tests) | Includes load-less nodes as blank rows |
 | CSV export, span lengths | Verified | `schedule_io.test.js` | One row per physical span |
-| TSV copy to the clipboard | Verified | `browser` §6; `schedule_io.test.js` | Falls back to `execCommand` on `file://` |
+| TSV copy to the clipboard | Verified | `browser` §7; `schedule_io.test.js` | Falls back to `execCommand` on `file://` |
 | CSV/paste import with delimiter detection | Verified | `schedule_io.test.js` | Comma or tab |
-| Staged import with a plan | Verified | `browser` §6, `schedule_io.test.js` | Nothing applied until Apply |
-| Replace vs update-matching-ids modes | Verified | `schedule_io.test.js`, `browser` §6 | — |
-| A bad line refuses the whole file | Verified | `browser` §6, `schedule_io.test.js` | 7 `IMPORT_ERRORS` codes |
+| Staged import with a plan | Verified | `browser` §7, `schedule_io.test.js` | Nothing applied until Apply |
+| Replace vs update-matching-ids modes | Verified | `schedule_io.test.js`, `browser` §7 | — |
+| A bad line refuses the whole file | Verified | `browser` §7, `schedule_io.test.js` | 7 `IMPORT_ERRORS` codes |
 | Unresolved rows reported, file still accepted | Verified | `schedule_io.test.js` | By design |
 | Excel/`.xlsx` direct import | **Unsupported** | — | CSV/TSV only |
 | Other CAD or GIS formats | **Unsupported** | — | — |
@@ -144,16 +144,16 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Feature | Status | Evidence | Limits |
 | --- | --- | --- | --- |
 | One shared scene for all outputs | Verified | `render.test.js`, `pdf_geometry.test.js` | — |
-| SVG export, editable primitives | Verified | `render.test.js`, `browser` §10 | — |
-| PDF export, vector only | Verified | `pdf_geometry.test.js` (11), `pdf_layouts.test.js` (12), `browser` §8 | jsPDF 4.2.1 vendored |
+| SVG export, editable primitives | Verified | `render.test.js`, `browser` §11 | — |
+| PDF export, vector only | Verified | `pdf_geometry.test.js` (11), `pdf_layouts.test.js` (12), `browser` §9 | jsPDF 4.2.1 vendored |
 | PDF page transform (one scale, centred) | Verified | `pdf_geometry.test.js` | — |
 | Four page layouts | Verified | `page_format.test.js` (9), `pdf_layouts.test.js` | See `10-limitations.md` §5 |
 | One page, every layout (automated) | Verified | `browser` "the drawing fits the printable height, so one sheet is enough" per layout, `print_fit.test.js` | The `c39eca9` fix |
-| Print paper matches the chosen layout | Verified | `browser` §9 (`@page size`) | — |
+| Print paper matches the chosen layout | Verified | `browser` §10 (`@page size`) | — |
 | Letter landscape in the real Chrome print dialog | **Verified (manual)** | Manual run recorded for `c39eca9` | — |
 | A4 portrait / A3 landscape in a real print dialog | **Incomplete validation** | Automated only | No manual run recorded |
 | Physical printer output | **Verified (manual, external)** | Carried out by the user | Not reproducible in this repo |
-| Export switches (loads, lengths) | Verified | `export_visibility.test.js` (11), `browser` §7 | Presentation only |
+| Export switches (loads, lengths) | Verified | `export_visibility.test.js` (11), `browser` §8 | Presentation only |
 | Exports hide `Origin` and letters | Verified | `export_visibility.test.js` | — |
 | Completeness notice never exported | Verified | `export_visibility.test.js` | — |
 | Export blocked on invalid routes or tight spacing | Verified | `browser`, `clearance.test.js` | — |
@@ -186,7 +186,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | Runs fully offline from the local filesystem | Verified | No network requests in the source; jsPDF vendored | `file://` disables the clipboard fallback path |
 | Works from `npm run serve` | Verified | `scripts/serve.js`, used by `test-browser.mjs` | — |
-| Chromium (via Playwright) | Verified | 198 browser checks | — |
+| Chromium (via Playwright) | Verified | 221 browser checks | — |
 | Chrome, manually | Verified (manual) | Print-dialog validation | — |
 | Firefox | **Incomplete validation** | Nothing browser-specific in the source | Never run |
 | Safari / iOS | **Incomplete validation** | Nothing browser-specific | Never run |

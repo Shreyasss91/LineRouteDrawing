@@ -9,7 +9,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | ID | Area | Severity | Status |
 | --- | --- | --- | --- |
 | [F1](#f1-the-form-and-the-project-parser-disagree-on-documented-limits) | Form vs. parser limits | Low | Open — documented, not changed |
-| [F2](#f2-an-edited-route-has-no-automated-test) | Untested UI path | Medium | Open |
+| [F2](#f2-an-edited-route-is-now-covered-by-a-browser-test) | Untested UI path | Medium | **Closed** — 22 browser checks exercise the edit form |
 | [F3](#f3-drag-at-zoom-is-implemented-but-unverified) | Untested UI behaviour | Low | Open |
 | [F4](#f4-the-static-spacing-minimum-in-the-markup-is-stale) | Stale literal | Low | Open |
 | [F5](#f5-unknown-keys-in-a-project-file-are-ignored-silently) | Forward compatibility | Low | Open |
@@ -49,22 +49,51 @@ accepts direction *labels* (`"South"`) proved **false** — `VALID_DIRECTIONS` h
 the lowercase keys, and a file containing `"South"` is refused with `INVALID_ROUTES`.
 Verified. All documentation now states keys only.
 
-## F2 — An edited route has no automated test
+## F2 — An edited route is now covered by a browser test
 
-**Observed.** Editing a row (`startEdit()` → "Save changes" →
+**Status: closed.** The interaction has real DOM coverage; no implementation defect was
+found.
+
+**Observed originally.** Editing a row (`startEdit()` → "Save changes" →
 `handleSubmit()` replace path, [src/ui/app.js](../src/ui/app.js)) is a common operation
-with **no automated coverage**:
+that had **no automated coverage**:
 
-- `route_identity.test.js` test 5 covers "editing one restored route does not touch
-  another" at the *model* level, not the DOM.
-- The browser suite (198 checks) never opens the edit form.
+- `route_identity.test.js` test 5 covered "editing one restored route does not touch
+  another" at the *model* level, not in the DOM.
+- The browser suite (then 198 checks) never opened the edit form.
 
 **Impact.** A regression in the edit path — for example losing the row's `id`, which
-would orphan its loads — would not be caught.
+would orphan its loads — would not have been caught.
 
-**Suggested fix.** Add a browser check: load the example, click Edit on row 2, change
-the direction, Save changes, and assert (a) the row count is unchanged, (b) the route
-id is preserved, (c) a load on the affected point is still resolved.
+**Fix.** A new browser section, *Editing an existing route*, in
+`scripts/test-browser.mjs` (+22 checks, 198 → 221). It builds a three-route project
+whose second route starts at point `A`, records a 25 kVA load on `A`, opens the edit form
+through the row's own Edit button, changes the direction East → West, and saves through
+the real form. It then asserts, against both the rendered table and the persisted
+project:
+
+- the route count is unchanged and the form returns to add mode;
+- the edited route keeps its id in the UI **and** in the saved file;
+- the load keeps the same endpoint id, stays out of the unresolved bar, and is still
+drawn as a `25 kVA` callout;
+- both neighbouring routes are byte-identical in the table;
+- all 11 designations belonging to the fixture's routes are unchanged;
+- the state survives a reload with the same id and the load still drawn.
+
+East → West was chosen deliberately: it keeps every node id, label and designation
+identical (verified against the real engine), so a failure indicates the edit path broke
+identity rather than the drawing legitimately changing shape.
+
+**No implementation defect was found.** The replacement path already spreads into the
+existing route object, so `id` is preserved, and endpoint asset ids are derived from the
+route id, so a load on `endpoint:A` stays resolved. The finding was a coverage gap, not a
+bug.
+
+**Test strength verified.** With `state.routes[index] = { id: createRoute(...).id, ... }`
+substituted for the real replacement, 4 checks fail (stable id in the UI, id in the saved
+file, designations, reload). With a line added that drops loads on the edited route's
+endpoints, 2 checks fail (load still recorded, callout still drawn). The source was then
+restored byte-for-byte (`git diff` empty) and the suites re-verified green.
 
 ## F3 — Drag at zoom is implemented but unverified
 
@@ -138,8 +167,8 @@ gating, hit areas, highlights, the annotation drag, and the mini-preview. Compar
 `network_panel.js` at 941 and `project.js` at 854.
 
 **Impact.** Low today (it works and the browser suite covers much of it), but it is the
-largest untested unit in the project, and its size is why several UI behaviours (F2,
-F3) have no tests — extracting a DOM-free helper is the only way to unit-test them.
+largest untested unit in the project, and its size is why several UI behaviours (F3)
+have no tests — extracting a DOM-free helper is the only way to unit-test them.
 
 **Suggested direction** (not done, and outside this task's scope): extract the
 viewport transform and the drag arithmetic into DOM-free modules, following the
@@ -224,6 +253,6 @@ defects in the application.
 | The parser accepts direction labels | It accepts **keys only**; `"South"` is refused with `INVALID_ROUTES` | F1 above, and [Persistence §2](05-persistence.md#2-project-field-reference) |
 | The spacing input's minimum is the constant 12 | The markup says 39 and boot sets it to **35** (`requiredSpanLength()`) | F4 above, [User guide §14](02-user-guide.md#14-span-spacing-and-clearance) |
 | `replacement.test.js` covers route-row deletion | It covers **project replacement** (`sameAuthoredProject`); row deletion is covered by `route_identity.test.js` and `reconcile.test.js` | [Feature matrix §1](09-feature-matrix.md#1-route-entry-and-topology) |
-| A browser check proves row editing | No such check exists | F2 above |
+| A browser check proves row editing | No such check exists **(now added — browser §5)** | F2 above |
 | A browser check proves a click is not a drag | No such check exists | [Feature matrix §5](09-feature-matrix.md#5-annotation-placement) |
 | The example's bounding box is `minX=−3, maxX=5` | It is `minX=0, maxX=12, minY=−17, maxY=0` | [Route and geometry §1](04-route-and-geometry.md#1-coordinate-system) |

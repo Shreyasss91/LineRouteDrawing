@@ -22,7 +22,7 @@ The full documentation set lives in [`documentation/`](documentation/README.md):
 | [Persistence and project format](documentation/05-persistence.md) | The exact JSON field reference, migrations, refusal codes, recovery |
 | [Identity and network data](documentation/06-identity-and-data.md) | Asset ids, designations, loads, span lengths, reconciliation |
 | [Rendering and export](documentation/07-rendering-and-export.md) | Profiles, the four page layouts, fit-to-sheet, the `c39eca9` regression |
-| [Testing and development](documentation/08-testing.md) | Commands, the 468 Node tests and 198 browser checks, conventions |
+| [Testing and development](documentation/08-testing.md) | Commands, the 468 Node tests and 221 browser checks, conventions |
 | [Feature and validation matrix](documentation/09-feature-matrix.md) | Every capability with its verification status |
 | [Known limitations](documentation/10-limitations.md) | What it cannot do, and what has not been validated |
 | [Findings](documentation/findings.md) | Defects and gaps recorded but deliberately not fixed |
@@ -337,7 +337,7 @@ before and after a reload, branch numbering, span ids, the load callouts, the
 incompleteness notice, dragging an annotation and reloading, the CSV import being
 staged rather than applied, all four export switch combinations, the content
 of the downloaded SVG and PDF, the print sheet fitting **one page on every one of
-the four layouts**, and the TC geometry on the printed sheet. **198 checks in 11
+the four layouts**, and the TC geometry on the printed sheet. **221 checks in 12
 sections.**
 
 It needs two things that the application itself does not:
