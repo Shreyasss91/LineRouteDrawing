@@ -199,18 +199,38 @@ export function loadsForNode(loads, nodeId) {
  * Returns a new list; the input is never mutated, so a caller can stage an edit
  * and discard it without having to undo anything.
  *
+ * A TC point is not a load-bearing asset, so a load on one is refused here rather
+ * than only in the form. The check needs to know what kind of point the id names,
+ * which is the registry's job, so the caller supplies `lookupNode`. When it is
+ * omitted the type cannot be known and the eligibility test is skipped - that
+ * keeps this module free of a dependency on the geometry layer, and the project
+ * parser and the schedule importer enforce the same rule at their own boundaries.
+ *
  * @param {Array<object>} loads Current records.
  * @param {object} input
  * @param {string} input.nodeId Node asset id.
  * @param {unknown} input.value Numeric value.
  * @param {unknown} [input.unit] Unit, defaults to kVA.
  * @param {string} [input.id] Explicit id, for a restored record.
- * @returns {{ok: true, loads: Array<object>, record: object} | {ok: false, message: string}}
+ * @param {(nodeId: string) => ({nodeType?: string} | null)} [input.lookupNode]
+ *   Resolve an asset id to its node, so eligibility can be checked.
+ * @returns {{ok: true, loads: Array<object>, record: object}
+ *   | {ok: false, code?: string, message: string}}
  */
 export function addLoad(loads, input = {}) {
   const nodeId = input.nodeId;
   if (!isAssetIdLike(nodeId)) {
     return { ok: false, message: 'A load must belong to a point.' };
+  }
+  // Refuse a point that cannot carry a load. Only done when the caller can tell us
+  // the node type, so this never invents a verdict from an id alone.
+  const target = typeof input.lookupNode === 'function' ? input.lookupNode(nodeId) : null;
+  if (target && isLoadEligible(target.nodeType) === false) {
+    return {
+      ok: false,
+      code: 'INELIGIBLE_LOAD_TARGET',
+      message: `A load cannot be recorded on a ${target.nodeType} point. Choose a pole, an FPB or the Origin.`,
+    };
   }
   const parsed = parseLoadValue(input.value);
   if (!parsed.ok) return { ok: false, message: parsed.message };

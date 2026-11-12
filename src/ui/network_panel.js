@@ -130,6 +130,19 @@ export function createNetworkPanel(options) {
     return registry().allNodeAssets();
   }
 
+  /**
+   * Resolve an asset id to its node, for callers that need the node type.
+   *
+   * Canonicalised first, because a node is reachable under more than one accepted
+   * spelling - its asset id and its coordinate key - and `nodeAsset()` only knows
+   * the canonical one. Without this an aliased spelling returned null and the
+   * eligibility check was skipped rather than applied.
+   */
+  function lookupNode(nodeId) {
+    const reg = registry();
+    return reg.nodeAsset(reg.canonicalNodeId(nodeId) ?? nodeId);
+  }
+
   /** Span assets for the current drawing. */
   function spanAssets() {
     return registry().allSpanAssets();
@@ -761,6 +774,7 @@ export function createNetworkPanel(options) {
       nodeId,
       value: dom.loadValue.value,
       unit: dom.loadUnit.value,
+      lookupNode,
     });
     if (!result.ok) {
       showFormError(result.message);

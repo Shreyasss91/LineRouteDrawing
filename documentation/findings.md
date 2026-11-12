@@ -1,8 +1,8 @@
 # Findings
 
-Observations made while documenting this codebase. **Nothing here was fixed.** The
-documentation task explicitly forbade changing application source, tests, dependencies
-or schema, so each item is recorded for a separate decision.
+Observations made while documenting this codebase. Most were recorded for a separate
+decision rather than fixed; **F10 has since been implemented and closed**, and is kept
+here in its closed form so the history of the defect stays visible.
 
 Severity is about what a user or maintainer would experience, not about code style.
 
@@ -17,7 +17,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F7](#f7-route-entry-has-no-undo-and-no-row-reordering) | Data safety | Medium | Open — by design |
 | [F8](#f8-appjs-is-a-1590-line-controller) | Maintainability | Low | Open |
 | [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | Open |
-| [F10](#f10-a-load-on-a-tc-point-is-not-refused-by-the-model-or-the-parser) | Eligibility not enforced at the boundary | Low–Medium | Open — documented, not changed |
+| [F10](#f10-a-load-on-a-tc-point-is-now-refused-by-the-model-and-the-parser) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — enforced at both boundaries and tested |
 
 ---
 
@@ -158,40 +158,55 @@ against obstacles, which is the most likely superlinear cost.
 **Suggested fix.** Add a scripted large-drawing timing check before claiming any scale
 limit.
 
-## F10 — A load on a TC point is not refused by the model or the parser
+## F10 — A load on a TC point is now refused by the model and the parser
 
-**Observed.** A TC point is documented as not load-eligible, and
-`isLoadEligible('tc') === false` is asserted by `test/schedules.test.js` test 15 and
-`test/annotations.test.js` test 27. But eligibility is enforced only by the
+**Status: closed.** Enforced at both boundaries with executable coverage.
+
+**Observed originally.** A TC point is documented as not load-eligible, and
+`isLoadEligible('tc') === false` was asserted by `test/schedules.test.js` test 15 and
+`test/annotations.test.js` test 27. But eligibility was enforced only by the
 **predicate** and by the point pickers / CSV export in `network_panel.js`. Neither
-`addLoad()` nor the project parser checks it. Verified directly:
+`addLoad()` nor the project parser checked it. Reproduced directly:
 
-- `addLoad([], {nodeId: 'dst:route-1' /* a TC */, value: 10, unit: 'kVA'}, registry)`
+- `addLoad([], {nodeId: 'dst:r3' /* a TC */, value: 10, unit: 'kVA'})`
   → `{ok: true}` with the record created.
-- A project document with `routes: [{..., tc: true, fpb: false}]` and
-  `loads: [{nodeId: 'dst:route-1', ...}]` → `parseProjectJson` returns **`ok: true`**
-  and keeps the load.
+- A valid serialised project with a load on `dst:r3` → `parseProjectJson` returned
+  **`ok: true`** and kept the load.
 
-**Impact.** Low for normal use — the dropdown offers only eligible points, so the UI
-cannot produce this state. It matters because the project file is the more permissive
+**Impact.** Low for normal use — the dropdown offered only eligible points, so the UI
+could not produce this state. It mattered because the project file is the more permissive
 interface (see [Known limitations §10](10-limitations.md#10-form-and-model-disagree-in-two-places)):
-a hand-edited or externally generated file can place a number on a TC triangle, and the
-annotation layer will draw that callout (its own comment notes it "can place one if a
-file somehow contains it").
+a hand-edited or externally generated file could place a number on a TC triangle.
 
-**Aggravating detail.** The title of `test/annotations.test.js` test 27 reads *"a load on
-a TC point is refused by the data model, not placed anyway"*, but its body asserts only
-`isLoadEligible(...) === false`. The test proves the predicate, not a refusal, so it does
-not cover the behaviour its name claims.
+**Aggravating detail, now corrected.** `test/annotations.test.js` test 27 was titled *"a
+load on a TC point is refused by the data model, not placed anyway"* but asserted only
+`isLoadEligible(...) === false`. It has been retitled to say what it does
+("the eligibility predicate excludes a TC point from carrying a load"), and the real
+model-refusal test now lives in `test/load_eligibility.test.js`.
 
-**Why it was not changed.** Making `addLoad()` or the parser reject a TC load is a
-behaviour change (it would make some previously-openable files unopenable) and would need
-a new refusal code plus a test. Out of scope for a documentation task.
+**Fix.** `addLoad()` accepts an optional `lookupNode` resolver and refuses a target whose
+`nodeType` is ineligible, returning `{ok: false, code: 'INELIGIBLE_LOAD_TARGET'}` without
+touching the input list. The panel supplies a canonicalising resolver. The project parser
+refuses a file carrying such a load in `validateMeasuredData()`, after building the
+registry, returning `INELIGIBLE_LOAD_TARGET` and nothing to apply.
 
-**Suggested fix.** Either apply `isLoadEligible()` in `validateMeasuredData()` — refusing
-with a new `INELIGIBLE_LOAD_TARGET` code — or explicitly document that the file format
-allows it. Either way, rename or strengthen `annotations.test.js` test 27 so its name
-matches what it asserts.
+**A bug the new test caught.** The first attempt resolved the target with
+`registry.nodeAsset(id)`, which only knows canonical ids, so an **aliased coordinate
+spelling** of the same TC node returned `null` and the check was silently skipped. Both
+the parser and the panel now canonicalise first (`canonicalNodeId`), and
+test 7 pins that the alias is refused.
+
+**Compatibility.** A saved file that already contains a TC load is now refused with a
+clear message naming the record and the point. Parsing is all-or-nothing, so nothing is
+half-applied, and the recovery/overwrite protections are unchanged — the stored project
+is not touched automatically. No schema migration was needed: the schema did not change,
+only which documents are accepted.
+
+**Deliberately unchanged.** `reassignLoad(loads, id, nodeId)` still has no registry
+argument, so it cannot resolve a node type; its guard remains the UI picker, which
+filters by `isLoadEligible`. Adding a parameter would change a settled API. An **orphan**
+load (pointing at a node the drawing no longer has) is still kept and warned about, not
+refused — that remains the user's data to reassign.
 
 ---
 

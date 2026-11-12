@@ -15,7 +15,7 @@
 import { DIRECTIONS, PAGE_LAYOUTS } from '../config.js';
 import { buildNetwork, normalizeMarkerKind } from '../geometry/network.js';
 import * as assetModule from '../geometry/assets.js';
-import { normalizeUnit } from '../data/schedules.js';
+import { isLoadEligible, normalizeUnit } from '../data/schedules.js';
 
 /** Identifies a file as a project for this tool. */
 export const PROJECT_FORMAT = 'line-route-drawing-project';
@@ -651,6 +651,32 @@ function validateMeasuredData(payload, network, problems) {
   const registry = buildAssetRegistry(network);
   for (const asset of registry.allNodeAssets()) liveNodes.add(asset.id);
   const liveSpans = new Set(registry.allSpanAssets().map((span) => span.id));
+
+  // ---- a load on a point that cannot carry one is fatal ----
+  // Distinct from the orphan check below: an orphan points at a node that no longer
+  // exists and is kept so the user can reassign it, but a TC point is alive and
+  // still cannot take a load, so the file is wrong rather than merely out of date.
+  // Resolved through the registry, never by reading the id, so an alias or a
+  // coordinate spelling cannot slip past it.
+  const ineligible = [];
+  for (const load of loads) {
+    const asset = registry.nodeAsset(registry.canonicalNodeId(load.nodeId) ?? load.nodeId);
+    if (asset && isLoadEligible(asset.nodeType) === false) ineligible.push({ load, asset });
+  }
+  if (ineligible.length > 0) {
+    const described = ineligible
+      .map(({ load, asset }) => `${load.id} on ${asset.label ?? load.nodeId} (a ${asset.nodeType} point)`)
+      .join(', ');
+    return {
+      ok: false,
+      code: 'INELIGIBLE_LOAD_TARGET',
+      message:
+        `That project cannot be opened: ${described} ` +
+        `${ineligible.length === 1 ? 'is a load on a point that does' : 'are loads on points that do'} ` +
+        'not take loads. A TC point is a test point, so remove the load or move it to a ' +
+        'pole, an FPB or the Origin.',
+    };
+  }
 
   const orphanLoads = loads.filter((load) => !liveNodes.has(load.nodeId));
   if (orphanLoads.length > 0) {

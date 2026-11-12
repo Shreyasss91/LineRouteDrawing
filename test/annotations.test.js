@@ -450,14 +450,17 @@ test('26. the scene reports that it has text when annotations exist', () => {
   assert.equal(s.hasVisibleText, true);
 });
 
-test('27. a load on a TC point is refused by the data model, not placed anyway', () => {
-  // A TC is out of scope for loads. The layer can place one if a file somehow
-  // contains it, but the model must not accept it in the first place, which is
-  // what keeps the drawing honest.
+test('27. the eligibility predicate excludes a TC point from carrying a load', () => {
+  // This asserts the predicate only. The model-level refusal of an actual addLoad
+  // on a TC target is pinned in schedules.test.js, where the registry is available
+  // to resolve the node type.
   const registry = buildAssetRegistry(buildNetwork(EXAMPLE, {}));
   const tc = registry.allNodeAssets().find((a) => a.nodeType === 'tc');
   assert.ok(tc, 'the example has a TC');
-  assert.equal(isLoadEligible(tc.nodeType), false, 'the model refuses it');
+  assert.equal(isLoadEligible(tc.nodeType), false, 'a TC point is out of scope for loads');
+  assert.equal(isLoadEligible('pole'), true);
+  assert.equal(isLoadEligible('fpb'), true);
+  assert.equal(isLoadEligible('origin'), true);
 });
 
 test('28. a manually placed callout keeps its offset in the scene', () => {

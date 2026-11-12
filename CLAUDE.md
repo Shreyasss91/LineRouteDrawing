@@ -33,7 +33,7 @@ The documents that matter most when changing code:
 node scripts/serve.js          # run the app: http://127.0.0.1:8080/
 node scripts/serve.js 3000     # or pick a port
 
-npm test                       # 458 Node tests, no dependencies needed (~1.2s)
+npm test                       # 468 Node tests, no dependencies needed (~1.2s)
 npm run test:browser           # 198 browser checks (needs Playwright + Chrome)
 npm run test:print:headed      # manual print-dialog check; needs a real terminal
 ```
@@ -109,7 +109,7 @@ run without a browser. They currently hold; keep them holding.
 | `originMarker` values | **`plain` / `tc` / `fpb`** (not `pole`) |
 | Storage key | `line-route-drawing:v3:project` |
 | Load units | `kVA` (default), `kW`, `kVAr`, `HP` — never summed, never converted |
-| TC / FPB eligibility | A TC point is **not** load-eligible (`isLoadEligible()`), enforced by the UI pickers and CSV export — **not** by `addLoad()` or the project parser (see F10) |
+| TC / FPB eligibility | A TC point is **not** load-eligible (`isLoadEligible()`), refused by `addLoad()` (via `lookupNode`), by the project parser (`INELIGIBLE_LOAD_TARGET`) and by the schedule importer |
 | Span separator | en dash `U+2013` (`A1–A2`); unmeasured label is `— m` |
 
 ### The two identity systems are different things

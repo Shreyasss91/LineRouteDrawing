@@ -12,7 +12,7 @@ says that too instead of guessing.
 Test evidence on the working tree that produced these documents:
 
 ```
-npm test               →  458 tests, 458 pass, 0 fail   (29 files)
+npm test               →  468 tests, 468 pass, 0 fail   (30 files)
 npm run test:browser   →  198/198 browser checks passed (11 sections)
 ```
 
@@ -42,7 +42,7 @@ npm run test:browser   →  198/198 browser checks passed (11 sections)
 → [Feature and validation matrix](09-feature-matrix.md) →
 [Known limitations §7](10-limitations.md#7-validation-status-by-area) →
 [Findings](findings.md). The short version: the domain layer is heavily tested
-(458 tests), the browser behaviour is checked end to end (198 checks), and the gaps are
+(468 tests), the browser behaviour is checked end to end (198 checks), and the gaps are
 listed explicitly rather than glossed.
 
 **A developer about to change the code**

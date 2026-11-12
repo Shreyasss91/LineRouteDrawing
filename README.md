@@ -22,7 +22,7 @@ The full documentation set lives in [`documentation/`](documentation/README.md):
 | [Persistence and project format](documentation/05-persistence.md) | The exact JSON field reference, migrations, refusal codes, recovery |
 | [Identity and network data](documentation/06-identity-and-data.md) | Asset ids, designations, loads, span lengths, reconciliation |
 | [Rendering and export](documentation/07-rendering-and-export.md) | Profiles, the four page layouts, fit-to-sheet, the `c39eca9` regression |
-| [Testing and development](documentation/08-testing.md) | Commands, the 458 Node tests and 198 browser checks, conventions |
+| [Testing and development](documentation/08-testing.md) | Commands, the 468 Node tests and 198 browser checks, conventions |
 | [Feature and validation matrix](documentation/09-feature-matrix.md) | Every capability with its verification status |
 | [Known limitations](documentation/10-limitations.md) | What it cannot do, and what has not been validated |
 | [Findings](documentation/findings.md) | Defects and gaps recorded but deliberately not fixed |
@@ -310,7 +310,7 @@ calculates a coordinate, a pole or a junction of its own.
 npm test
 ```
 
-Uses Node's built-in test runner; no dependencies to install. **458 tests across 29
+Uses Node's built-in test runner; no dependencies to install. **468 tests across 30
 files** cover cardinal directions, span and pole counts, alphabetical labelling, TC
 identification and naming, endpoint reuse, shared-node merging, partial and complete
 overlap, intersections, multiple branches, label visibility per profile, TC retention
@@ -452,11 +452,10 @@ The detailed list, with what has and has not been validated, is in
   off-canvas. Load callouts and span lengths are content, not labels, and are kept,
   subject to the two export switches. The measurement-completeness notice is a
   working aid and is never exported.
-- A load cannot be attached to a TC point *through the interface*: the point pickers and
-  the CSV/TSV export filter on `isLoadEligible()`, so a TC point is never offered or
-  listed. This is a UI and predicate gate rather than a hard model rule — a hand-edited
-  project file naming a TC point in a load is accepted. See
-  [documentation/findings.md](documentation/findings.md) F10.
+- A load cannot be attached to a TC point. The rule is enforced in three places:
+  `addLoad()` refuses the target, the project parser refuses the file with
+  `INELIGIBLE_LOAD_TARGET`, and the schedule importer refuses the row. Ineligible
+  targets are resolved through the asset registry, so an aliased spelling is caught.
 - Moving a load to a different point, or resolving an unresolved record, is done from
   the schedule rather than by dragging. Dragging a callout or a span label nudges the
   annotation, not the load: the record stays on its pole.

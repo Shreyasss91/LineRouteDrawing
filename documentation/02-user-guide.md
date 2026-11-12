@@ -235,14 +235,13 @@ Form: `#field-load-node` (Point), `#field-load-value`, `#field-load-unit`
 
 - **Eligible points:** `pole`, `fpb`, `origin` (`LOAD_ELIGIBLE_TYPES` / `isLoadEligible()`
   in [src/data/schedules.js](../src/data/schedules.js)). A **TC point is not eligible**.
-- The gate is the *eligibility predicate*, applied by the point pickers and the CSV/TSV
-  export in [src/ui/network_panel.js](../src/ui/network_panel.js), so the UI never offers a
-  TC point and never lists one. `addLoad()` itself does **not** check eligibility, and the
-  project parser does not either — so a hand-edited project file *can* contain a load on a
-  TC point and it will be accepted. See
-  [findings F10](findings.md#f10-a-load-on-a-tc-point-is-not-refused-by-the-model-or-the-parser).
-  `test/schedules.test.js` test 15 pins `isLoadEligible('tc') === false`; it does not
-  exercise `addLoad`.
+- This is enforced at both boundaries: `addLoad()` refuses a TC target when given a
+  `lookupNode` resolver (which the panel supplies), and the project parser refuses a
+  file that carries one with the code `INELIGIBLE_LOAD_TARGET`. The schedule importer
+  refuses such a row too. All three resolve the target through the asset registry, so
+  an aliased coordinate spelling cannot slip past.
+- `test/load_eligibility.test.js` pins both refusals; `test/schedules.test.js` test 15
+  and `test/annotations.test.js` test 27 pin the eligibility predicate itself.
 - **Value:** must be a finite number `> 0`. Zero is refused rather than treated as
   empty.
 - **Default unit:** `kVA` (`DEFAULT_LOAD_UNIT`).

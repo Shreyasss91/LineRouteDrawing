@@ -136,10 +136,8 @@ id is a refusal (`BAD_LAYOUT`), not a silent fallback.
 
 - `value` is written as a number, so `12.5` stays `12.5`.
 - A `nodeId` the drawing no longer has is **kept and warned about**, not refused.
-- A TC point is not load-eligible (`isLoadEligible('tc') === false`), so the UI pickers
-  and the CSV/TSV export never offer or list one. This is a **UI and predicate** gate, not
-  a parser gate: a project file that names a TC point in `loads[].nodeId` is accepted
-  (recorded as [findings F10](findings.md#f10-a-load-on-a-tc-point-is-not-refused-by-the-model-or-the-parser)).
+- A TC point is not load-eligible (`isLoadEligible('tc') === false`). A file that names a
+  TC point in `loads[].nodeId` is **refused** with `INELIGIBLE_LOAD_TARGET`; see below.
   [Identity and network data](06-identity-and-data.md#5-loads).
 
 ### `project.spanLengths` — measured lengths
@@ -300,6 +298,7 @@ Nothing is returned half-applied.
 | `BAD_PLACEMENTS` | measured | a placement table present but not a table |
 | `BAD_DESIGNATIONS` | measured | `nodeDesignations` present but not a table |
 | `INVALID_MEASUREMENTS` | measured | any collected problem: a load with no id, a duplicate load id, no `nodeId`, a value not `> 0`, an unknown unit, a span length not `> 0` |
+| `INELIGIBLE_LOAD_TARGET` | measured | a load whose resolved point cannot carry one — a live TC point. Resolved through the asset registry, so an aliased spelling is caught too. Distinct from an orphan, which is kept |
 | `DUPLICATE_DESIGNATION` | designations | two **different coordinates** carry the same name |
 
 Two deliberate behaviours:
