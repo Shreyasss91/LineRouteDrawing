@@ -257,6 +257,7 @@ src/geometry/           the network model: no DOM, fully testable
   scene.js              builds the normalized render scene
 src/render/svg.js       scene to SVG
 src/render/pdf.js       scene to vector PDF (jsPDF operations)
+src/render/print.js     fit a scene onto one printed sheet, aspect preserved
 src/ui/                 state, example resolution and the DOM controller
 vendor/jspdf/           jsPDF 4.2.1, MIT, vendored locally
 scripts/serve.js        loopback static server
@@ -347,6 +348,32 @@ accepting one would let a script report a pass for an inspection nobody performe
 without a terminal it reports `INPUT UNAVAILABLE` and exits 1 straight away rather
 than waiting out the inspection period. Only Enter acknowledges; other keys are
 ignored, and Ctrl+C cancels (exit 130).
+
+Two things in the dialog are separate, and the script reports the first of them as
+automated evidence rather than leaving both to the person:
+
+1. **The paper.** The print document declares it (`@page{size:A4 landscape}` and so on,
+   derived from `PAGE_LAYOUTS`), and the script prints what it declared alongside the
+   drawing's size on the sheet. **Chrome may keep its own previously selected paper
+   instead of honouring that declaration.** When the dialog shows a different size,
+   that is Chrome's remembered setting and not a fault in the drawing: choose the
+   paper in the dialog and check again. The application cannot force the paper
+   dropdown, and does not claim to.
+
+2. **The number of pages.** This is the part the application is responsible for. The
+   drawing is sized to fit inside the paper minus its margin, at one scale for both
+   axes, so it fills the sheet without ever exceeding it. Two or more sheets is a
+   defect.
+
+The drawing is 536 units wide by 736 tall, which is taller than it is wide. The print
+stylesheet once sized it with `width:100%;height:auto`, which scales to the content
+width and derives the height from the aspect ratio without consulting the sheet height.
+On every landscape layout that made the drawing 1.8 to 2.0 times taller than the
+printable area, and the browser split it across two pages. Only A4 portrait fitted, and
+only because its printable area is taller than it is wide, which is why the fault
+looked layout-specific. `src/render/print.js` now computes an explicit size using the
+same rule as `fitSceneToPage` in the PDF renderer, and `test/print_fit.test.js` pins it
+for every configured layout.
 
 One limitation is recorded rather than solved. The lifecycle tests in
 `test/print_tty_state.test.js` drive the real `waitForManualAcknowledgement` through a

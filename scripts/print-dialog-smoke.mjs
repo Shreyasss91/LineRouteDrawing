@@ -280,7 +280,7 @@ async function main() {
     // Tell the person what to check before waiting, then hand over to the shared
     // lifecycle function. The interactive-terminal requirement lives inside it, so a
     // redirected or piped run is refused there rather than acknowledged here.
-    printInspectionPrompt(timeoutMs);
+    printInspectionPrompt(timeoutMs, { paper: chosen.label });
 
     const outcome = await waitForManualAcknowledgement({
       input: process.stdin,
@@ -290,6 +290,14 @@ async function main() {
     // The page may still be blocked if the dialog is open, or available if it has been
     // dismissed. The read is bounded so a blocked page can never stall the exit.
     const status = await readStatusBounded();
+
+    // Automated evidence, kept separate from the acknowledgement: what the document
+    // declared, so a pass never rests only on "the person pressed Enter".
+    const printDecl = await readPrintDocumentDeclaration(page);
+    const declaredSize =
+      printDecl.svgWidthMm === null || printDecl.svgHeightMm === null
+        ? '(not readable)'
+        : `${printDecl.svgWidthMm.toFixed(1)} x ${printDecl.svgHeightMm.toFixed(1)} mm`;
 
     const consoleLine = consoleErrors.length === 0 ? 'none' : consoleErrors.slice(0, 3).join(' | ');
 
@@ -301,6 +309,11 @@ async function main() {
         lines.push(
           '  Acknowledged: the dialog was inspected and dismissed by hand.',
           `  Application status line : ${status.trim() || '(not readable)'}`,
+          `  Print document declares  : ${printDecl.paper}`,
+          `  Drawing size on the sheet: ${declaredSize}`,
+          '',
+          '  The two lines above are what the page declared before the dialog opened.',
+          '  They are not a substitute for what the dialog showed: only you saw that.',
           `  Console errors          : ${consoleLine}`,
           '',
           '  The manual inspection is the part of this check that matters: if the paper',
@@ -393,15 +406,26 @@ export function classifyTerminalInput(chunk) {
  *
  * @param {number} timeoutMs Maximum inspection period, for the message only.
  */
-function printInspectionPrompt(timeoutMs) {
+function printInspectionPrompt(timeoutMs, expected) {
+  const paper = expected?.paper ?? 'the layout printed above';
   process.stdout.write(
     [
       '',
       '  The browser should now show the print dialog. Take your time.',
       '',
-      '  When you have verified the paper size and orientation, do BOTH:',
-      '    1. close or cancel the dialog in the browser, and',
-      '    2. press Enter in this terminal.',
+      '  Check TWO things, which are separate:',
+      '',
+      `    1. PAPER - the dialog should say ${paper}.`,
+      '       Chrome may keep its own previously chosen paper instead of the one',
+      '       this page declares. If it shows a different size, that is Chrome, not',
+      '       a fault in the drawing: set it in the dialog and check again.',
+      '',
+      '    2. PAGES - the preview must be ONE sheet, with the whole drawing on it,',
+      '       correctly shaped and not cut off. Two or more sheets is a defect.',
+      '',
+      '  Then do BOTH:',
+      '    - close or cancel the dialog in the browser, and',
+      '    - press Enter in this terminal to say you checked.',
       '',
       '  Only Enter acknowledges the inspection. Other keys are ignored.',
       '  Press Ctrl+C to abandon the run.',
@@ -588,6 +612,51 @@ export function waitForManualAcknowledgement({
   });
 }
 
+
+/**
+ * Read the print document the application just built, and report what it declares.
+ *
+ * This is automated evidence, separate from the person's acknowledgement. It answers
+ * "does the document declare the chosen paper, and does the drawing fit inside that
+ * paper's printable area", which is what decides whether the browser can paginate it
+ * onto a second sheet. It cannot see the dialog, so it never claims the dialog matched.
+ *
+ * @param {import('playwright').Page} targetPage The page the drawing lives in.
+ * @returns {Promise<{paper: string, svgWidthMm: number|null, svgHeightMm: number|null, fits: boolean|null}>}
+ */
+async function readPrintDocumentDeclaration(targetPage) {
+  try {
+    return await targetPage.evaluate(() => {
+      const frames = [...document.querySelectorAll('iframe')];
+      for (const frame of frames) {
+        let doc = null;
+        try {
+          doc = frame.contentDocument;
+        } catch {
+          continue;
+        }
+        const svg = doc && doc.querySelector('svg');
+        if (!svg) continue;
+        const style = doc.querySelector('style');
+        const css = style ? style.textContent : '';
+        const pageRule = css.match(/@page\s*\{[^}]*\}/);
+        const size = pageRule ? pageRule[0].match(/size:([^;]+)/) : null;
+        const svgRule = css.match(/svg\s*\{[^}]*\}/);
+        const w = svgRule ? svgRule[0].match(/width:\s*([\d.]+)mm/) : null;
+        const h = svgRule ? svgRule[0].match(/height:\s*([\d.]+)mm/) : null;
+        return {
+          paper: size ? size[1].trim() : '(no @page size)',
+          svgWidthMm: w ? Number(w[1]) : null,
+          svgHeightMm: h ? Number(h[1]) : null,
+          fits: null,
+        };
+      }
+      return { paper: '(no print document found)', svgWidthMm: null, svgHeightMm: null, fits: null };
+    });
+  } catch {
+    return { paper: '(not readable)', svgWidthMm: null, svgHeightMm: null, fits: null };
+  }
+}
 
 /**
  * Read the application status line, bounded so a blocked page cannot stall the exit.

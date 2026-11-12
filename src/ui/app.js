@@ -30,6 +30,7 @@ import {
 } from './project.js';
 import { clearStorage, loadFromStorage, saveToStorage } from './storage.js';
 import { renderSceneToSvg } from '../render/svg.js';
+import { fitSceneToPrintSheet } from '../render/print.js';
 import { renderSceneToPdf } from '../render/pdf.js';
 import {
   createRoute,
@@ -1252,6 +1253,11 @@ function printDrawing() {
   const layout = PAGE_LAYOUTS[state.layout] ?? PAGE_LAYOUTS.a4_landscape;
   const orientation = layout.orientation === 'portrait' ? 'portrait' : 'landscape';
 
+  // The margin is part of the @page rule below, so the same number is used in both
+  // places and there is nothing to keep in sync by hand.
+  const MARGIN_MM = 10;
+  const fitted = fitSceneToPrintSheet(scene, layout, MARGIN_MM);
+
   const frame = document.createElement('iframe');
   frame.setAttribute('aria-hidden', 'true');
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
@@ -1266,7 +1272,22 @@ function printDrawing() {
       // set to A3 or Letter used to be sent to the printer as A4, so the sheet
       // was the wrong size and the drawing was scaled for paper it was not on.
       layout.cssPageSize +
-      ';margin:10mm}html,body{margin:0;padding:0}svg{display:block;width:100%;height:auto}' +
+      ';margin:' +
+      MARGIN_MM +
+      'mm}' +
+      // The zero margins here are what the @page rule already provides; repeating them
+      // stops the body's own margin adding to it and pushing the drawing over.
+      'html,body{margin:0;padding:0}' +
+      // An explicit size fills the sheet without ever exceeding it. width:100% with
+      // height:auto would scale to the content width regardless of the sheet height,
+      // which split a tall drawing across two pages on every landscape layout.
+      'svg{display:block;width:' +
+      fitted.widthMm.toFixed(3) +
+      'mm;height:' +
+      fitted.heightMm.toFixed(3) +
+      'mm;margin:0 auto}' +
+      // Nothing may be split across sheets or repeated as a header on the second one.
+      'svg,body{page-break-inside:avoid;break-inside:avoid}' +
       '</style></head><body>' +
       renderSceneToSvg(scene, { standalone: false }) +
       '</body></html>',
@@ -1285,6 +1306,7 @@ function printDrawing() {
   }
   dom.exportStatus.textContent = `Sent to the print dialog (${layout.label}, ${orientation}).`;
 }
+
 
 /* ------------------------------------------------------------------ */
 /* Preview interaction                                                */

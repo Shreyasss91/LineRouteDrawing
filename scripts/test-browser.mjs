@@ -857,12 +857,86 @@ try {
     check(`${layout.id}: the print sheet embeds the drawing`, /<svg[\s>]/.test(printHtml));
     const svgTag = (printHtml.match(/<svg[^>]*>/) ?? [''])[0];
     const viewBox = (svgTag.match(/viewBox="([^"]+)"/) ?? [])[1] ?? '';
+    // The scene's own aspect ratio, taken from the drawing rather than restated, so the
+    // print sizing is compared against the shape it is actually meant to preserve.
+    const viewBoxParts = viewBox.trim().split(/\s+/).map(Number);
+    const sceneAspect =
+      viewBoxParts.length === 4 && viewBoxParts[2] > 0 && viewBoxParts[3] > 0
+        ? viewBoxParts[2] / viewBoxParts[3]
+        : 0;
     check(
       `${layout.id}: the embedded SVG carries a viewBox`,
       /^-?[\d.]+\s+-?[\d.]+\s+[\d.]+\s+[\d.]+$/.test(viewBox),
       viewBox,
     );
-    check(`${layout.id}: the drawing scales to the printed page`, /width:100%/.test(printCss));
+    // The drawing's size on the sheet. This is the two-sheet defect: `width:100%`
+    // scales to the content width and derives the height from the aspect ratio, so a
+    // drawing taller than it is wide overflowed every landscape sheet and the browser
+    // paginated it. The size must instead be explicit and fit inside the printable box,
+    // which is the paper minus the page margin on all four sides.
+    const svgRule = (printCss.match(/svg\s*\{[^}]*\}/) ?? [''])[0];
+    const widthMm = Number((svgRule.match(/width:\s*([\d.]+)mm/) ?? [])[1]);
+    const heightMm = Number((svgRule.match(/height:\s*([\d.]+)mm/) ?? [])[1]);
+    check(
+      `${layout.id}: the drawing is given an explicit size on the sheet`,
+      Number.isFinite(widthMm) && Number.isFinite(heightMm) && widthMm > 0 && heightMm > 0,
+      `width ${widthMm}mm height ${heightMm}mm`,
+    );
+    check(
+      `${layout.id}: the drawing is not sized by content width`,
+      !/width:\s*100%/.test(svgRule),
+      svgRule.replace(/\s+/g, ' '),
+    );
+
+    // The printable box: the paper minus its margin, in millimetres. The paper size is
+    // taken from what the print document declared, so this compares the drawing against
+    // the sheet it was actually sent to rather than against a restated constant.
+    const marginMm = Number((pageRule.match(/margin:\s*([\d.]+)mm/) ?? [])[1]);
+    const PAPER_MM = {
+      a3: { width: 1190.55, height: 841.89 },
+      a4: { width: 841.89, height: 595.28 },
+      letter: { width: 792, height: 612 },
+    };
+    const pointsToMm = 25.4 / 72;
+    // `size:` carries the format and the orientation; a portrait page swaps the axes.
+    const formatKey = sizeValue.split(/\s+/)[0].toLowerCase();
+    const isPortrait = /portrait/i.test(sizeValue);
+    const paper = PAPER_MM[formatKey];
+    const paperWidthPt = paper ? (isPortrait ? paper.height : paper.width) : NaN;
+    const paperHeightPt = paper ? (isPortrait ? paper.width : paper.height) : NaN;
+    const boxWidthMm = paperWidthPt * pointsToMm - marginMm * 2;
+    const boxHeightMm = paperHeightPt * pointsToMm - marginMm * 2;
+    check(
+      `${layout.id}: the declared paper is a known size`,
+      Number.isFinite(boxWidthMm) && Number.isFinite(boxHeightMm),
+      `size "${sizeValue}", margin ${marginMm}mm`,
+    );
+    // A tenth of a millimetre absorbs the millimetre-precision rounding in the CSS size
+    // without allowing real overflow, which is tens of millimetres.
+    const FIT_TOLERANCE_MM = 0.1;
+    check(
+      `${layout.id}: the drawing fits the printable width, so one sheet is enough`,
+      widthMm <= boxWidthMm + FIT_TOLERANCE_MM,
+      `${widthMm.toFixed(2)}mm against a ${boxWidthMm.toFixed(2)}mm box`,
+    );
+    check(
+      `${layout.id}: the drawing fits the printable height, so one sheet is enough`,
+      heightMm <= boxHeightMm + FIT_TOLERANCE_MM,
+      `${heightMm.toFixed(2)}mm against a ${boxHeightMm.toFixed(2)}mm box. ` +
+        'Exceeding this is the two-sheet overflow.',
+    );
+    check(
+      `${layout.id}: the drawing is not stretched or squashed`,
+      // The CSS size is written to three decimal places of a millimetre, so the ratios
+      // are compared to that rounding rather than to floating-point equality.
+      Math.abs(widthMm / heightMm - sceneAspect) < 1e-3,
+      `ratio ${(widthMm / heightMm).toFixed(6)} against the scene's ${sceneAspect.toFixed(6)}`,
+    );
+    check(
+      `${layout.id}: nothing may be split across sheets`,
+      /break-inside:\s*avoid/.test(printCss),
+      'page-break-inside:avoid must be present',
+    );
 
     // The symbol, read from the print sheet rather than from the preview.
     const polygonMatch = printHtml.match(/<polygon[^>]*id="tc:[^>]*points="([^"]+)"/);
