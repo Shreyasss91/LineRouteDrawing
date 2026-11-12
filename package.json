@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
     "test:browser": "node scripts/test-browser.mjs",
+    "test:print:headed": "node scripts/print-dialog-smoke.mjs",
     "serve": "node scripts/serve.js"
   },
   "keywords": [

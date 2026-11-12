@@ -108,25 +108,68 @@ export const MARKER_KINDS = Object.freeze({
 /** Page layouts offered for PDF export and printing. */
 
 /**
- * The CSS `@page size` keyword for a paper format.
+ * The CSS `@page size` keyword for each paper format the application supports.
  *
  * CSS names a paper size by a keyword, not by the format key the PDF writer uses,
- * and the two spellings differ for Letter. Keeping the mapping here means the print
+ * and the two spellings differ for Letter. Keeping the table here means the print
  * stylesheet and the PDF renderer cannot drift apart on what paper "letter" means.
  *
- * @param {string} format One of the `format` values below.
- * @returns {string} A CSS page-size keyword.
+ * This is the only place the two spellings are related. It is a lookup rather than
+ * a `switch` with a fallback because a fallback is how the wrong paper is printed
+ * silently: an unrecognised format returned A4, so a layout naming a paper this
+ * table does not know would have printed on A4 and reported nothing. A missing
+ * entry is a configuration fault, and it is now raised as one.
  */
-function cssFormatName(format) {
-  switch (format) {
-    case 'a3':
-      return 'A3';
-    case 'letter':
-      return 'Letter';
-    case 'a4':
-    default:
-      return 'A4';
+const CSS_FORMAT_NAMES = Object.freeze({
+  a3: 'A3',
+  a4: 'A4',
+  letter: 'Letter',
+});
+
+/** The orientations CSS understands, and the only two a layout may declare. */
+const CSS_ORIENTATIONS = Object.freeze(['landscape', 'portrait']);
+
+/**
+ * The CSS `@page size` keyword for a paper format.
+ *
+ * @param {string} format One of the keys of `CSS_FORMAT_NAMES`.
+ * @returns {string} A CSS page-size keyword.
+ * @throws {RangeError} When the format is not one the application supports.
+ */
+export function cssFormatName(format) {
+  const name = Object.prototype.hasOwnProperty.call(CSS_FORMAT_NAMES, format)
+    ? CSS_FORMAT_NAMES[format]
+    : undefined;
+  if (name === undefined) {
+    const supported = Object.keys(CSS_FORMAT_NAMES).join(', ');
+    throw new RangeError(
+      `Unknown page format "${String(format)}". ` +
+        `Add it to CSS_FORMAT_NAMES in src/config.js, which maps a paper format ` +
+        `to the CSS name the print stylesheet needs. Supported formats: ${supported}.`,
+    );
   }
+  return name;
+}
+
+/**
+ * The orientation keyword for a layout, validated.
+ *
+ * Orientation is half of the CSS page size and also decides which dimension is the
+ * long one when a page is fitted, so a value CSS does not recognise would produce a
+ * rule the browser ignores and a transform measured against the wrong page shape.
+ *
+ * @param {string} orientation
+ * @returns {string}
+ * @throws {RangeError} When the orientation is not landscape or portrait.
+ */
+export function cssOrientationName(orientation) {
+  if (!CSS_ORIENTATIONS.includes(orientation)) {
+    throw new RangeError(
+      `Unknown page orientation "${String(orientation)}". ` +
+        `Use one of: ${CSS_ORIENTATIONS.join(', ')}.`,
+    );
+  }
+  return orientation;
 }
 
 /**
@@ -138,13 +181,13 @@ function cssFormatName(format) {
  * user chose; before this, the print stylesheet hardcoded A4 and printed an A3 or
  * Letter drawing onto A4 paper.
  *
- * @param {{id: string, label: string, widthPt: number, heightPt: number, format: string, orientation: string}} layout
+ * @param {{id: string, label: string, widthPt: number, heightPt: number, format: string, orientation: string}} spec
  * @returns {Readonly<object>} A frozen layout.
  */
 function layout(spec) {
   return Object.freeze({
     ...spec,
-    cssPageSize: `${cssFormatName(spec.format)} ${spec.orientation}`,
+    cssPageSize: `${cssFormatName(spec.format)} ${cssOrientationName(spec.orientation)}`,
   });
 }
 

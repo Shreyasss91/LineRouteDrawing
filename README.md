@@ -260,7 +260,8 @@ src/render/pdf.js       scene to vector PDF (jsPDF operations)
 src/ui/                 state, example resolution and the DOM controller
 vendor/jspdf/           jsPDF 4.2.1, MIT, vendored locally
 scripts/serve.js        loopback static server
-scripts/test-browser.mjs    committed browser suite (npm run test:browser)
+scripts/test-browser.mjs    committed browser suite (npm run test:browser)
+scripts/print-dialog-smoke.mjs  headed print-dialog check (npm run test:print:headed)
 scripts/verify-browser.mjs  older ad-hoc Playwright probe
 test/                   automated tests
 ```
@@ -316,6 +317,28 @@ It needs two things that the application itself does not:
 The harness starts its own static server on a free port, clears browser storage
 before each scenario, and exits non-zero if any check fails. It is a development
 aid; the application itself never depends on Playwright.
+
+### Print dialog smoke test
+
+```sh
+npm run test:print:headed
+npm run test:print:headed -- --layout a4_portrait
+```
+
+The browser suite checks the print sheet by reading the document it builds, with
+`window.print()` replaced so no dialog opens. That cannot show what the browser
+resolves a paper size to in its own dialog. This command covers that one step. It
+opens a visible browser, loads the example, selects the layout and presses the real
+Print drawing button without replacing anything, so the browser's own dialog appears.
+It defaults to A3 landscape, the layout most likely to have been printed onto A4 by
+mistake.
+
+Nothing is sent to a printer and no print job is confirmed. The dialog must be
+dismissed by hand, and what it displayed is judged by eye against the instructions
+printed when it opens. Physical printer behaviour - margins, driver scaling, "fit to
+page" - is decided by the printer driver and needs a real sheet, so it stays a manual
+check rather than an automated one. This is why the command is separate: a native
+dialog blocks whoever opens it, and the automated suite must never block.
 
 ## Dependencies and licenses
 
