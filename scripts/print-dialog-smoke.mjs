@@ -277,7 +277,15 @@ async function main() {
     // instead of handing control to the user.
     await page.locator('#btn-print').click({ noWaitAfter: true });
 
-    const outcome = await runManualInspection(timeoutMs);
+    // Tell the person what to check before waiting, then hand over to the shared
+    // lifecycle function. The interactive-terminal requirement lives inside it, so a
+    // redirected or piped run is refused there rather than acknowledged here.
+    printInspectionPrompt(timeoutMs);
+
+    const outcome = await waitForManualAcknowledgement({
+      input: process.stdin,
+      timeoutMs,
+    });
 
     // The page may still be blocked if the dialog is open, or available if it has been
     // dismissed. The read is bounded so a blocked page can never stall the exit.
@@ -356,10 +364,12 @@ if (isMainModule) await main();
  * is an acknowledgement. Anything else is an ordinary key and means nothing here.
  *
  * This is a pure function so the classification can be tested directly, without a
- * terminal, a browser or a print dialog.
+ * terminal, a browser or a print dialog. It deliberately says nothing about whether
+ * the input came from a terminal: that is the lifecycle's job, because a newline
+ * from a pipe is not a person and must not be mistaken for one.
  *
  * @param {Buffer|Uint8Array|string} chunk Raw bytes from the stream.
- * @returns {"acknowledged"|"cancelled"|null} What the chunk contained, if anything.
+ * @returns {'acknowledged'|'cancelled'|null} What the chunk contained, if anything.
  */
 export function classifyTerminalInput(chunk) {
   const bytes = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
@@ -374,34 +384,16 @@ export function classifyTerminalInput(chunk) {
   return null;
 }
 
+
 /**
- * Wait for the user to inspect the dialog and confirm in the terminal.
+ * Print what the person should check in the print dialog, before the wait begins.
  *
- * A single `await` on the Enter key would never time out, and a bare timer would
- * close the browser while the user is still reading. Racing them is what gives both
- * a real wait and a guaranteed exit.
+ * Kept separate from the wait so the lifecycle function has no output of its own and
+ * can be exercised without capturing stdout.
  *
- * The ways this can end are kept distinct rather than collapsed into a boolean,
- * because they mean different things and only one of them is a success:
- *
- *   acknowledged      the user pressed Enter; the inspection was performed
- *   cancelled         the user pressed Ctrl+C; they chose to stop
- *   timed_out         the deadline passed with no acknowledgement
- *   input_unavailable stdin ended without an acknowledgement being received
- *
- * Reporting a cancellation as a timeout would be actively misleading: it claims a
- * person sat idle for three minutes when in fact they stopped the run at once, and it
- * hides that they acted deliberately. Each outcome therefore gets its own message and
- * its own exit code.
- *
- * Keys other than Enter are ignored. An acknowledgement is a deliberate act, so a
- * stray keystroke must not stand in for one; the listener stays armed and the run
- * continues waiting.
- *
- * @param {number} timeoutMs Maximum manual inspection period, in milliseconds.
- * @returns {Promise<'acknowledged'|'cancelled'|'timed_out'|'input_unavailable'>} How the wait ended.
+ * @param {number} timeoutMs Maximum inspection period, for the message only.
  */
-async function runManualInspection(timeoutMs) {
+function printInspectionPrompt(timeoutMs) {
   process.stdout.write(
     [
       '',
@@ -414,6 +406,9 @@ async function runManualInspection(timeoutMs) {
       '  Only Enter acknowledges the inspection. Other keys are ignored.',
       '  Press Ctrl+C to abandon the run.',
       '',
+      '  This must be run in an interactive terminal. A piped or redirected run',
+      '  cannot acknowledge the inspection and is refused straight away.',
+      '',
       '  If Enter does not arrive within',
       `  ${Math.round(timeoutMs / 1000)} seconds, this run times out and closes the browser.`,
       '  Nothing is sent to a printer and no print job is submitted.',
@@ -421,89 +416,178 @@ async function runManualInspection(timeoutMs) {
       '  Press Enter when done > ',
     ].join('\n'),
   );
+}
+/**
+ * The outcomes of waiting for a person to acknowledge a manual inspection.
+ *
+ * They are kept distinct rather than collapsed into a boolean, because they mean
+ * different things and only one of them is a success. Reporting a cancellation as a
+ * timeout would claim a person sat idle for three minutes when in fact they stopped
+ * the run at once, and would hide that they acted deliberately.
+ *
+ * @typedef {'acknowledged'|'cancelled'|'timed_out'|'input_unavailable'} InspectionOutcome
+ */
 
-  const input = process.stdin;
+/** Outcomes that count as a completed manual inspection. Only one does. */
+export const ACKNOWLEDGED = 'acknowledged';
 
-  // No stdin at all (a detached run): nothing can ever acknowledge, so there is no
-  // point waiting out the full period.
-  if (!input) return 'input_unavailable';
+/**
+ * Wait for a person to acknowledge a manual inspection at a real terminal.
+ *
+ * This is the single implementation used by the headed smoke test. Every dependency
+ * that would make it untestable - the input stream and the timer functions - is
+ * injected, so the tests drive exactly this code rather than a copy of its cleanup
+ * steps.
+ *
+ * The check exists to prove that a human looked at the browser's native print
+ * dialog. That makes the source of the input part of the rule, not a detail: a
+ * newline arriving through a pipe is not a person, and acknowledging on one would
+ * let a machine-run or redirected invocation report a pass for an inspection nobody
+ * performed. So a successful acknowledgement REQUIRES an interactive TTY, and the
+ * function fails closed - returning `input_unavailable` immediately, without sitting
+ * out the inspection period - whenever interactive input is impossible.
+ *
+ * Raw mode is required for that interactivity: it is what makes a single keypress
+ * arrive without the terminal waiting for a line. If raw mode cannot be enabled there
+ * is no interactive path left, and rather than silently continuing to read a cooked
+ * stream the function gives up and reports `input_unavailable`.
+ *
+ * @param {object} options
+ * @param {NodeJS.ReadStream|null|undefined} options.input The input stream to read.
+ * @param {number} options.timeoutMs Maximum manual inspection period, in milliseconds.
+ * @param {typeof setTimeout} [options.setTimer] Timer used for the deadline.
+ * @param {typeof clearTimeout} [options.clearTimer] Canceller for the deadline timer.
+ * @returns {Promise<InspectionOutcome>} How the wait ended.
+ */
+export function waitForManualAcknowledgement({
+  input,
+  timeoutMs,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
+  // No stream at all (a detached or closed run): nothing can ever acknowledge, so
+  // there is nothing to wait for.
+  if (!input) return Promise.resolve('input_unavailable');
+
+  // The fail-closed gate. A pipe, a file or any other non-terminal input cannot carry
+  // a human's confirmation, so it is refused before a single listener is attached.
+  // Returning immediately - rather than waiting out the timeout - matters because the
+  // full period is only meaningful if a person could actually answer within it.
+  if (input.isTTY !== true) return Promise.resolve('input_unavailable');
+
+  // Raw mode is the mechanism by which a keypress arrives immediately. Where the
+  // stream offers no such mechanism there is no interactive path, and pretending
+  // otherwise by reading a cooked stream would accept line-buffered input that a
+  // script could produce.
+  if (typeof input.setRawMode !== 'function') return Promise.resolve('input_unavailable');
 
   return new Promise((resolve) => {
-    let finished = false;
+    let settled = false;
     let timer = null;
 
     /**
-     * The raw-mode state stdin had before this function touched it.
+     * The raw-mode state the stream had before this function touched it.
      *
-     * Restored exactly on the way out rather than unconditionally disabled, so a
-     * caller that had already put the terminal in raw mode gets it back as it was
-     * instead of having its own configuration silently changed.
+     * Recorded up front and restored exactly on the way out, rather than simply
+     * switched off, so a caller that had already put its terminal in raw mode gets it
+     * back as it was instead of having a configuration it owns silently changed.
      */
-    const wasRaw = Boolean(input.isTTY && input.isRaw);
-    const usedTty = Boolean(input.isTTY && typeof input.setRawMode === 'function');
+    const wasRaw = Boolean(input.isRaw);
 
+    /** Whether raw mode was actually turned on by this call, and so is ours to undo. */
     let rawEnabled = false;
 
-    const onData = (chunk) => {
+    // Each cleanup step is its own guard. One failing must not skip the others: a
+    // stream that throws on the way back to cooked mode still needs its listeners
+    // removed and its timer cleared.
+    const cleanupSteps = [
+      () => input.removeListener('data', onData),
+      () => input.removeListener('end', onEnd),
+      () => input.removeListener('close', onEnd),
+      () => input.removeListener('error', onEnd),
+      () => {
+        if (rawEnabled) input.setRawMode(wasRaw);
+      },
+      () => input.pause(),
+    ];
+
+    /**
+     * Undo everything this function did, each step independently.
+     *
+     * @param {(...args: unknown[]) => void} resolve Promise resolver to settle with.
+     * @param {InspectionOutcome} outcome The outcome to report.
+     */
+    function cleanupAndResolve(resolveFn, outcome) {
+      for (const step of cleanupSteps) {
+        try {
+          step();
+        } catch {
+          // A closed or already-restored stream: this step has nothing to undo. The
+          // remaining steps are still attempted.
+        }
+      }
+      // Cleared only after the restore step has run, so the guard inside it still
+      // sees that raw mode was turned on and is ours to undo.
+      rawEnabled = false;
+      resolveFn(outcome);
+    }
+
+    /**
+     * Settle the wait, at most once.
+     *
+     * The guard is what makes repeated or late events harmless: a stream can emit both
+     * `end` and `close`, and a chunk can arrive after the deadline fired. Whoever gets
+     * here first decides the outcome, and everyone afterwards is ignored.
+     *
+     * @param {InspectionOutcome} outcome The outcome to report.
+     */
+    function finish(outcome) {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) {
+        clearTimer(timer);
+        timer = null;
+      }
+      cleanupAndResolve(resolve, outcome);
+    }
+
+    /** Handle one chunk of input, ignoring anything that is not an answer. */
+    function onData(chunk) {
       const result = classifyTerminalInput(chunk);
       if (result) finish(result);
       // Anything else is an ordinary key: ignored, and the listener stays armed.
-    };
-
-    // End of input without an acknowledgement. Reported as its own outcome rather
-    // than as a timeout, because nothing was being waited for any more.
-    const onEnd = () => finish('input_unavailable');
-
-    /** Undo everything this function did to the stream and the terminal. */
-    function cleanup() {
-      try {
-        input.removeListener('data', onData);
-        input.removeListener('end', onEnd);
-        input.removeListener('close', onEnd);
-        input.removeListener('error', onEnd);
-        if (rawEnabled && typeof input.setRawMode === 'function') {
-          // Back to exactly what it was, not merely "off".
-          input.setRawMode(wasRaw);
-        }
-        input.pause();
-      } catch {
-        // A closed or already-restored stream: nothing left to undo.
-      }
     }
 
-    function finish(result) {
-      if (finished) return;
-      finished = true;
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      cleanup();
-      resolve(result);
+    // End of input without an acknowledgement. Its own outcome rather than a timeout,
+    // because once the stream has closed nothing is being waited for any more.
+    const onEnd = () => finish('input_unavailable');
+
+    // Attach nothing until raw mode is confirmed working, so a failed activation never
+    // leaves a half-initialised stream behind.
+    try {
+      input.setRawMode(true);
+      rawEnabled = true;
+    } catch {
+      // No interactive path remains. Report that plainly instead of falling back to
+      // reading a cooked stream, which would accept input a script could produce.
+      // Nothing was changed, so there is nothing to restore; resolving directly is
+      // the whole of it.
+      resolve('input_unavailable');
+      return;
     }
 
     input.on('data', onData);
     input.on('end', onEnd);
     input.on('close', onEnd);
     input.on('error', onEnd);
-
-    if (usedTty) {
-      try {
-        input.setRawMode(true);
-        rawEnabled = true;
-      } catch {
-        // Activation failed: the listeners are still armed and the deadline still
-        // applies, and cleanup() knows raw mode was never turned on.
-        rawEnabled = false;
-      }
-    }
     input.resume();
 
     // Referenced, so the process stays alive for the whole inspection period, and
     // cleared the moment the wait ends so it can never fire into a later run.
-    timer = setTimeout(() => finish('timed_out'), timeoutMs);
+    timer = setTimer(() => finish('timed_out'), timeoutMs);
   });
 }
+
 
 /**
  * Read the application status line, bounded so a blocked page cannot stall the exit.

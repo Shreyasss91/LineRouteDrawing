@@ -260,7 +260,8 @@ src/render/pdf.js       scene to vector PDF (jsPDF operations)
 src/ui/                 state, example resolution and the DOM controller
 vendor/jspdf/           jsPDF 4.2.1, MIT, vendored locally
 scripts/serve.js        loopback static server
-scripts/test-browser.mjs    committed browser suite (npm run test:browser)
+scripts/test-browser.mjs    committed browser suite (npm run test:browser)
+
 scripts/print-dialog-smoke.mjs  headed print-dialog check (npm run test:print:headed)
 scripts/verify-browser.mjs  older ad-hoc Playwright probe
 test/                   automated tests
@@ -339,6 +340,23 @@ printed when it opens. Physical printer behaviour - margins, driver scaling, "fi
 page" - is decided by the printer driver and needs a real sheet, so it stays a manual
 check rather than an automated one. This is why the command is separate: a native
 dialog blocks whoever opens it, and the automated suite must never block.
+
+It must be run in an interactive terminal. A pipe or a redirected file cannot
+acknowledge the inspection, because a newline arriving that way is not a person, and
+accepting one would let a script report a pass for an inspection nobody performed. Run
+without a terminal it reports `INPUT UNAVAILABLE` and exits 1 straight away rather
+than waiting out the inspection period. Only Enter acknowledges; other keys are
+ignored, and Ctrl+C cancels (exit 130).
+
+One limitation is recorded rather than solved. The lifecycle tests in
+`test/print_tty_state.test.js` drive the real `waitForManualAcknowledgement` through a
+fake stream that imitates a terminal's contract - the `isTTY` flag, `isRaw`,
+`setRawMode` and the event methods. That is not a pseudo-terminal: it has no kernel
+line discipline, and it cannot show what Enter actually sends or whether the operating
+system restores terminal settings after the process exits. A pseudo-terminal is not
+obtainable in every environment (Windows has no `pty` module, and `winpty` needs a
+console this build cannot allocate), so the interactive path itself is verified by
+running this command in a real terminal, which is what it is for.
 
 ## Dependencies and licenses
 
