@@ -24,11 +24,15 @@
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
 
-const ROOT = resolve(import.meta.dirname, '..');
+// `import.meta.dirname` needs Node 20.11, but package.json permits any Node 20, where
+// it is undefined. `fileURLToPath(import.meta.url)` gives the same directory and has
+// been available far longer, so the declared minimum stays truthful.
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * Load Playwright from wherever it is installed.

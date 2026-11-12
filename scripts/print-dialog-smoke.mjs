@@ -31,9 +31,14 @@
 
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(import.meta.dirname, '..');
+// `import.meta.dirname` only exists from Node 20.11, while package.json permits any
+// Node 20, where it is undefined and `resolve(undefined, '..')` throws before
+// anything runs. `fileURLToPath(import.meta.url)` has been available far longer and
+// gives the same directory, so the declared minimum stays truthful.
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /* ------------------------------------------------------------------ */
 /* Playwright                                                          */
@@ -239,59 +244,169 @@ try {
   );
 
   // The real workflow. `printDrawing()` writes the document, calls print() on the
-  // hidden frame, and leaves it to the browser. The dialog blocks the page while it
-  // is open. This call therefore does not return until a person dismisses it, which
-  // is exactly the behaviour a smoke test wants and exactly why it is kept out of
-  // the automated suite.
+  // hidden frame, and leaves it to the browser. The native dialog that opens blocks
+  // the page it belongs to and waits for a person; `window.print()` does not return
+  // until that person acts.
   //
-  // Everything after this point that touches the page must tolerate a page that is
-  // still blocked. `page.evaluate` does not: a dialog holds the renderer, so the
-  // evaluation never resolves and the script waits forever. The wait below is
-  // therefore a plain timer with no page access at all, and the status is read once
-  // afterwards with a short bound so a blocked page cannot stall the exit.
+  // The lifecycle is driven from the terminal, not from the page, because a dialog
+  // holds the renderer: `page.evaluate` cannot resolve while it is open, so no DOM
+  // polling can tell us when it closes. Node-side timers and stdin are the only
+  // things that can be trusted here. The user is told exactly what to check, then
+  // asked to inspect the dialog and press Enter in this terminal once they are done.
+  // Nothing is ever sent to a printer, and the script never confirms or submits a
+  // print job; the dialog must be dismissed by hand, exactly as in normal use.
   const timeoutMs = Number(process.env.PRINT_WAIT_MS ?? 180000);
-  process.stdout.write(
-    `  Waiting up to ${Math.round(timeoutMs / 1000)}s for the dialog to be dismissed...\n`,
-  );
 
+  // Press the real button. `noWaitAfter` is required: the click's continuation never
+  // arrives while the dialog holds the page, so waiting for it would hang this script
+  // instead of handing control to the user.
   await page.locator('#btn-print').click({ noWaitAfter: true });
-  await new Promise((r) => setTimeout(r, Math.min(timeoutMs, 2500)));
 
-  /** Read the status line, giving up quickly if the page is still blocked. */
-  async function readStatus() {
-    try {
-      return await Promise.race([
-        page.evaluate(() => document.querySelector('#export-status')?.textContent ?? ''),
-        new Promise((resolveRace) => setTimeout(() => resolveRace(''), 3000)),
-      ]);
-    } catch {
-      return '';
-    }
+  const acknowledged = await runManualInspection(timeoutMs);
+
+  // The page may still be blocked if the dialog is open, or available if it has been
+  // dismissed. The read is bounded so a blocked page can never stall the exit.
+  const status = await readStatusBounded();
+
+  if (acknowledged) {
+    process.stdout.write(
+      [
+        '',
+        '  Result',
+        '  ------',
+        '  Acknowledged: the dialog was inspected and dismissed by hand.',
+        `  Application status line : ${status.trim() || '(not readable)'}`,
+        `  Console errors          : ${consoleErrors.length === 0 ? 'none' : consoleErrors.slice(0, 3).join(' | ')}`,
+        '',
+        '  The manual inspection is the part of this check that matters: if the paper',
+        '  size and orientation in the dialog matched the layout above, it passed.',
+        '',
+        '  This script does not confirm what a printer driver would have done with the',
+        '  sheet. Margins, driver scaling and "fit to page" are decided by the printer,',
+        '  not by this page, and verifying them needs a physical printout, which is out',
+        '  of scope for this check.',
+        '',
+      ].join('\n'),
+    );
+  } else {
+    process.stdout.write(
+      [
+        '',
+        '  Result',
+        '  ------',
+        `  TIMED OUT after ${Math.round(timeoutMs / 1000)}s without manual acknowledgement.`,
+        '  The requested manual verification was not completed, so this run is a failure.',
+        '',
+      ].join('\n'),
+    );
   }
 
-  const status = await readStatus();
-
-  process.stdout.write(
-    [
-      '',
-      '  Result',
-      '  ------',
-      `  Application status line : ${status.trim() || '(not readable)'}`,
-      `  Console errors          : ${consoleErrors.length === 0 ? 'none' : consoleErrors.slice(0, 3).join(' | ')}`,
-      '',
-      consoleErrors.length === 0
-        ? '  No console errors were raised during the print workflow.'
-        : '  Console errors were raised; see above.',
-      '',
-      '  This script cannot confirm what the dialog showed. That judgement is the',
-      '  manual part of this check: if the paper size and orientation matched the',
-      '  layout above and the preview looked right, it passed.',
-      '',
-    ].join('\n'),
-  );
-
-  if (consoleErrors.length > 0) process.exitCode = 1;
+  if (consoleErrors.length > 0) {
+    process.stdout.write(`\n  Console errors were raised during the print workflow:\n`);
+    for (const error of consoleErrors.slice(0, 5)) process.stdout.write(`    - ${error}\n`);
+    process.exitCode = 1;
+  }
+  if (!acknowledged) process.exitCode = 1;
 } finally {
   await browser.close().catch(() => {});
   server.kill();
+}
+
+/**
+ * Wait for the user to inspect the dialog and confirm in the terminal.
+ *
+ * A single `await` on the Enter key would never time out, and a bare timer would
+ * close the browser while the user is still reading. Combining them is what gives
+ * both the real wait and the guaranteed exit: the reader either receives a line
+ * (the user pressed Enter) or the timer fires (the deadline passed), and whichever
+ * happens first settles the race. The dialog itself is never touched by this
+ * function - closing it is entirely the user's manual action, exactly as in normal
+ * printing.
+ *
+ * @param {number} timeoutMs Maximum manual inspection period, in milliseconds.
+ * @returns {Promise<boolean>} True when the user pressed Enter before the deadline.
+ */
+async function runManualInspection(timeoutMs) {
+  process.stdout.write(
+    [
+      '',
+      `  The browser should now show the print dialog. Take your time.`,
+      '',
+      '  When you have verified the paper size and orientation, do BOTH:',
+      '    1. close or cancel the dialog in the browser, and',
+      '    2. press Enter in this terminal.',
+      '',
+      '  The script waits for your Enter. If it does not arrive within',
+      `  ${Math.round(timeoutMs / 1000)} seconds, this run times out and closes the browser.`,
+      '  Nothing is sent to a printer and no print job is submitted.',
+      '',
+      '  Press Enter when done > ',
+    ].join('\n'),
+  );
+
+  return new Promise((resolve) => {
+    let finished = false;
+    let timer = null;
+
+    /** Leave raw mode as it was found, so the terminal is usable afterwards. */
+    const restore = () => {
+      const input = process.stdin;
+      try {
+        if (input?.isTTY && typeof input.setRawMode === 'function') input.setRawMode(false);
+        input?.pause();
+      } catch {
+        // Nothing to restore, or stdin already closed.
+      }
+    };
+
+    const finish = (value) => {
+      if (finished) return;
+      finished = true;
+      if (timer) clearTimeout(timer);
+      restore();
+      resolve(value);
+    };
+
+    // The reader. stdin is a stream, so a single read() is enough to wait for one
+    // line; there is no loop and nothing that could block a second time.
+    const reader = () => {
+      const input = process.stdin;
+      if (!input) {
+        // No stdin at all (a detached run): the deadline is the only way out.
+        return;
+      }
+      input.resume();
+      if (typeof input.setRawMode === 'function' && input.isTTY) {
+        // A terminal delivers the Enter byte immediately, which lets Ctrl+C be told
+        // apart from a normal acknowledgement.
+        input.setRawMode(true);
+        input.once('data', (chunk) => finish(chunk[0] !== 0x03));
+        return;
+      }
+      input.once('data', () => finish(true));
+    };
+
+    // The deadline. A referenced timer keeps the process alive for its whole span, so
+    // this resolves before the process can exit on its own, and it is cleared as soon
+    // as the user acknowledges rather than being left to fire later.
+    timer = setTimeout(() => finish(false), timeoutMs);
+
+    reader();
+  });
+}
+
+/**
+ * Read the application status line, bounded so a blocked page cannot stall the exit.
+ *
+ * @returns {Promise<string>} The status text, or '' when the page is unavailable.
+ */
+async function readStatusBounded() {
+  try {
+    return await Promise.race([
+      page.evaluate(() => document.querySelector('#export-status')?.textContent ?? ''),
+      new Promise((resolveRace) => setTimeout(() => resolveRace(''), 3000)),
+    ]);
+  } catch {
+    return '';
+  }
 }
