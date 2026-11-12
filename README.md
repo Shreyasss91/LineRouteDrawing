@@ -231,6 +231,13 @@ The example is stored as data in `src/config.js` and is loaded by the
   export buttons are disabled. The drawing stays visible and the number you
   typed is kept, so you can see the effect and decide; nothing is changed for
   you, and the topology never changes with spacing.
+- **The exported PDF draws every symbol at page scale, through one transform.**
+  The triangle, the pole crosses and the cable are all placed by the same rule,
+  so the symbol always sits exactly on the point it marks and a conductor never
+  appears to run through it. This is checked by reading the vector paths out of
+  the downloaded file, not by trusting the drawing that produced it: the earlier
+  version of this code passed every check that looked at the model while the
+  finished sheet still had a cable stroke inside the triangle.
 
 ## Project layout
 

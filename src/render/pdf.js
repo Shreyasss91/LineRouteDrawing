@@ -147,6 +147,16 @@ export function renderSceneToPdf(scene, options) {
   }
 
   // TC triangles, from the scene's own polygon points.
+  //
+  // Drawn as three ordinary line segments through the same `tx`/`ty` transform as
+  // the route lines. `doc.lines` was used before and it takes RELATIVE offsets in
+  // the document's own units, so passing scene-space deltas unscaled against an
+  // already-scaled anchor put the shape at the wrong size and, because the two
+  // coordinate systems have opposite vertical axes, at the wrong place: the
+  // triangle landed far below the point it marked, and the conductor that
+  // legitimately left the real TC node then appeared to run through the wrong
+  // place in the exported sheet. One transform for every stroke removes the
+  // chance of the two disagreeing.
   if (scene.tc.length) {
     doc.setLineWidth(poleWidth);
     doc.setDrawColor(0, 0, 0);
@@ -157,18 +167,12 @@ export function renderSceneToPdf(scene, options) {
         .map((pair) => pair.split(',').map(Number));
       const [a, b, c] = pts;
       if (!a || !b || !c) continue;
-      doc.lines(
-        [
-          [b[0] - a[0], b[1] - a[1]],
-          [c[0] - b[0], c[1] - b[1]],
-          [a[0] - c[0], a[1] - c[1]],
-        ],
-        tx(a[0]),
-        ty(a[1]),
-        [1, 1],
-        'S',
-        false,
-      );
+      const corners = [a, b, c];
+      for (let i = 0; i < corners.length; i += 1) {
+        const from = corners[i];
+        const to = corners[(i + 1) % corners.length];
+        doc.line(tx(from[0]), ty(from[1]), tx(to[0]), ty(to[1]));
+      }
     }
   }
 

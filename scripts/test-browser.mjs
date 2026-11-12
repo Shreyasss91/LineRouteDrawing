@@ -860,13 +860,89 @@ try {
     // And the PDF stays vector-only while carrying the symbol.
     const pdfFile = await saveDownload(page, '#btn-pdf', workdir, 'tc-geometry.pdf');
     const pdfText = pdfContent(await (await import('node:fs/promises')).readFile(pdfFile));
-    check('the PDF is still vector-only', !/\/Subtype\s*\/Image/.test(pdfText));
-    // Lines are drawn with the path operators `m` (move) and `l` (line), so a
-    // vector drawing always contains both. `re` is only used for rectangles.
-    check(
-      'the PDF carries drawn line geometry',
-      /[0-9.]+ [0-9.]+ m[ \n]/.test(pdfText) && /[0-9.]+ [0-9.]+ l[ \n]/.test(pdfText),
-    );
+    // The real check: read the vector paths out of the downloaded PDF and prove
+    // none of them enters the triangular symbol. This is the assertion the earlier
+    // work was missing - it only looked at the scene and at the presence of path
+    // operators, and a conductor was inside the triangle on the finished sheet in
+    // both cases.
+    const pdfSegments = [];
+    {
+      let cursor = null;
+      const op = /(-?\d*\.?\d+)\s+(-?\d*\.?\d+)\s+(m|l)\b/g;
+      let hit;
+      while ((hit = op.exec(pdfText))) {
+        const x = Number(hit[1]);
+        const y = Number(hit[2]);
+        if (hit[3] === 'm') {
+          cursor = { x, y };
+        } else {
+          if (cursor) pdfSegments.push({ x1: cursor.x, y1: cursor.y, x2: x, y2: y });
+          cursor = { x, y };
+        }
+      }
+    }
+    check('the PDF vector paths were read', pdfSegments.length > 20, `${pdfSegments.length} paths`);
+
+    // Find the marker triangle in the PDF by looking for three segments that close
+    // into a small loop. Deriving it from the drawing's own measurements would need
+    // the page transform; finding it in the sheet needs none.
+    const near = (a, b) => Math.abs(a - b) < 0.02;
+    const vertices = [];
+    for (const a of pdfSegments) {
+      for (const b of pdfSegments) {
+        if (a === b || !near(a.x2, b.x1) || !near(a.y2, b.y1)) continue;
+        for (const c of pdfSegments) {
+          if (c === a || c === b) continue;
+          if (!near(b.x2, c.x1) || !near(b.y2, c.y1)) continue;
+          if (!near(c.x2, a.x1) || !near(c.y2, a.y1)) continue;
+          const verts = [
+            { x: a.x1, y: a.y1 },
+            { x: a.x2, y: a.y2 },
+            { x: b.x2, y: b.y2 },
+          ];
+          const wide = Math.max(...verts.map((p) => Math.abs(p.x - verts[0].x)));
+          const tall = Math.max(...verts.map((p) => Math.abs(p.y - verts[0].y)));
+          // A marker symbol, not some large closed area of the diagram.
+          if (wide < 2 || tall < 2 || wide > 40 || tall > 40) continue;
+          // One loop is reachable from any of its corners, so the same triangle
+          // turns up three times. Count distinct shapes, not traversals.
+          const shape = verts
+            .map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`)
+            .sort()
+            .join(' ');
+          if (!vertices.some((entry) => entry.shape === shape)) vertices.push({ verts, shape });
+        }
+      }
+    }
+    check('the PDF contains a closed marker triangle', vertices.length >= 1, `${vertices.length}`);
+
+    {
+      const tri = vertices[0].verts;
+      const strictlyInside = (p) => {
+        const sign = (u, v, w) => (u.x - w.x) * (v.y - w.y) - (v.x - w.x) * (u.y - w.y);
+        const d1 = sign(p, tri[0], tri[1]);
+        const d2 = sign(p, tri[1], tri[2]);
+        const d3 = sign(p, tri[2], tri[0]);
+        const edge = 1e-4;
+        return (d1 > edge && d2 > edge && d3 > edge) || (d1 < -edge && d2 < -edge && d3 < -edge);
+      };
+      let intruders = 0;
+      for (const seg of pdfSegments) {
+        const isSide =
+          tri.some((p) => near(p.x, seg.x1) && near(p.y, seg.y1)) &&
+          tri.some((p) => near(p.x, seg.x2) && near(p.y, seg.y2));
+        if (isSide) continue;
+        for (let step = 0; step <= 400; step += 1) {
+          const t = step / 400;
+          const p = { x: seg.x1 + (seg.x2 - seg.x1) * t, y: seg.y1 + (seg.y2 - seg.y1) * t };
+          if (strictlyInside(p)) {
+            intruders += 1;
+            break;
+          }
+        }
+      }
+      check('no PDF vector path enters the marker triangle', intruders === 0, `${intruders} paths`);
+    }
   }
 
   /* ---------------- Console ---------------- */
