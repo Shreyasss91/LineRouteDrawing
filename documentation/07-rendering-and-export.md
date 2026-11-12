@@ -209,6 +209,28 @@ Contract:
   network request and no bundler.
 - `compress: false` is a testing option so tests can assert on raw operators.
 
+### PDF page scales for the bundled example
+
+The PDF fit uses **points** and the default `pdfMarginPt = 28`, so its scale differs
+from the print scale in millimetres above. Both were verified by running the code
+with the example scene (536 × 736 px):
+
+| layout | PDF `fit.scale` | print `scale` (mm path, §3) |
+| --- | --- | --- |
+| `a4_landscape` | 0.7327 | 0.2582 |
+| `a4_portrait` | 1.0061 | 0.3545 |
+| `a3_landscape` | 1.0678 | 0.3764 |
+| `letter_landscape` | 0.7554 | 0.2662 |
+
+The two columns are not comparable numbers: the PDF scale maps scene pixels to
+**points** with a 28 pt margin, the print scale maps them to **millimetres** with a
+10 mm margin. They are listed together because an earlier defect (commit `e48b67c`)
+was a marker drawn at raw scene size instead of through `fit.scale` — the triangle
+came out about 2.4× too large at the A4-landscape scale of 0.7327. Any suspicion that
+a symbol is drawn at the wrong size should be checked against the PDF column, and
+`test/pdf_layouts.test.js` now asserts it on every layout rather than only on A4
+landscape.
+
 ## 5. SVG export
 
 `#btn-svg` → file `line-route-drawing.svg`, with an opaque white background (so it
@@ -243,9 +265,23 @@ svg { width: 100%; height: auto; }
 
 `width: 100%` scales the drawing to the *content width* and never consults the sheet
 *height*. The example drawing is 536 units wide by 736 tall — taller than it is wide.
-On a landscape sheet, filling the width makes it about 1.8–2.0× taller than the
-printable area, so the browser broke it across two pages. A4 portrait happened to fit
-only because its printable area is taller than it is wide.
+On a landscape sheet, filling the width makes it taller than the printable area. The
+commit recorded these measured figures, and they reproduce exactly from the current
+constants (536 × 736 scene, 10 mm margin):
+
+| layout | printable box | height the width-driven rule produced | factor | pages before the fix |
+| --- | --- | --- | --- | --- |
+| `a4_landscape` | 277.0 × 190.0 mm | 380.4 mm | **2.00×** | 2 |
+| `a3_landscape` | 400.0 × 277.0 mm | 549.3 mm | **1.98×** | 2 |
+| `letter_landscape` | 259.4 × 195.9 mm | 356.2 mm | **1.82×** | 2 |
+| `a4_portrait` | 190.0 × 277.0 mm | 260.9 mm | 0.94× | **1** |
+
+A4 portrait was the only layout that fitted, and only because its printable area is
+taller than it is wide. That is why the fault looked layout-specific rather than
+universal: the one configuration anybody happened to check first was the one that
+worked. The paper itself was already correct throughout — `cssPageSize` produced a
+Letter-landscape `@page` rule and Chrome's MediaBox came back 792 × 612 pt — so the
+defect was purely the size given to the SVG *inside* that page.
 
 **Fix.** `fitSceneToPrintSheet()` computes an **explicit** width and height in
 millimetres with one uniform scale taken from the binding constraint:

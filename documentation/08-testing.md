@@ -126,6 +126,23 @@ drawing is legible. It needs an interactive terminal — when there is no TTY, o
 is not a terminal, it detects that (`classifyTerminalInput`, `print_tty_state.test.js`)
 and reports that the check is manual rather than hanging.
 
+**Environment variables and outcomes.** `PRINT_WAIT_MS` sets the inspection period
+(default `180000`, i.e. 180 s). The script resolves to exactly one of four outcomes,
+and only the first is a pass:
+
+| Outcome | Meaning | Exit code |
+| --- | --- | --- |
+| `acknowledged` | a person pressed **Enter** on a real terminal | 0 |
+| `cancelled` | **Ctrl+C** — a deliberate stop, not a timeout | 130 |
+| `timed_out` | the period expired with no acknowledgement | non-zero |
+| `input_unavailable` | stdin is not an interactive terminal (or setRawMode is missing) | 1, immediately |
+
+A pipe cannot acknowledge the check: `printf '\n' | npm run test:print:headed`
+returns `input_unavailable` rather than a false pass. Only Enter counts; any other
+keystroke is ignored and the wait continues. These rules were each added as a fix
+(commits `13bde6b`, `701813f`, `debe214`) because the earlier versions acknowledged on
+any key, reported Ctrl+C as a timeout, and let a redirected newline pass as a human.
+
 This is the path used for the **manual Chrome print-dialog validation of Letter
 landscape**, and the user carried out physical-printer validation separately. See
 [Known limitations](10-limitations.md#7-validation-status-by-area).

@@ -190,9 +190,12 @@ view:
 - **TC** — triangle. Anchored with its **base midpoint on the node** and its apex
   pointing back along the cable that arrives; the leaving span therefore keeps its
   whole configured length. Sized larger than an X pole marker. Never takes an
-  alphabetical letter. Named `TC` when it is the only one, `TC1`, `TC2`, … otherwise.
+  alphabetical letter. Named `TC` when it is the only TC *destination*, `TC1`, `TC2`, …
+  otherwise.
 - **FPB** — rectangle sized to its own label with `FPB` written inside. Centred on
-  the node. Never takes a letter. Named `FPB` when unique, `FPB1`, `FPB2`, …
+  the node. Never takes a letter. Named `FPB` when it is the only FPB *destination*,
+  `FPB1`, `FPB2`, … otherwise. (An Origin drawn as an FPB does not count towards that
+  number, so an FPB Origin plus one FPB destination draws two boxes both labelled `FPB`.)
 - Both **replace** the X at their node: no marker ever receives two symbols.
 - Route lines are **trimmed against both shapes** in the scene, so no conductor is
   drawn inside the symbol and the line still visually meets it

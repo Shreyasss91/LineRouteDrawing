@@ -133,8 +133,18 @@ that might one day be called `A1`.
 | --- | --- |
 | Origin | always `Origin` |
 | Alphabetical endpoints | `A`…`Z`, then `AA`, `AB`, … (bijective base-26, in creation order) |
-| TC | `TC` when it is the only one, else `TC1`, `TC2`, … |
-| FPB | `FPB` when it is the only one, else `FPB1`, `FPB2`, … |
+| TC | `TC` when it is the only **TC destination**, else `TC1`, `TC2`, … |
+| FPB | `FPB` when it is the only **FPB destination**, else `FPB1`, `FPB2`, … |
+
+One precision worth knowing: numbering is by route **destination** count (`tcCount` /
+`fpbCount`), not by how many such symbols appear on the sheet. An Origin declared an
+FPB plus one FPB destination therefore still draws both boxes labelled `FPB`, because
+there is one FPB destination. Verified by running `buildScene` on
+`Origin(fpb) → South 1 → A → South 2 (FPB)`:
+
+```
+fpb boxes: [ 'FPB', 'FPB' ]   poles: 2   labels: [ 'A', 'Origin' ]
+```
 
 **An alphabetical letter is never given to a TC or an FPB.** That is what makes `A`
 unambiguous; `showLabels` also never draws a letter on a marker node.
