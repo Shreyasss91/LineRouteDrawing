@@ -17,7 +17,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F7](#f7-route-entry-has-no-undo-and-no-row-reordering) | Data safety | Medium | Open — by design |
 | [F8](#f8-appjs-is-a-1590-line-controller) | Maintainability | Low | Open |
 | [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | Open |
-| [F10](#f10-a-load-on-a-tc-point-is-now-refused-by-the-model-and-the-parser) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — enforced at both boundaries and tested |
+| [F10](#f10-a-load-on-a-tc-point-is-now-refused-by-the-model-parser-and-import-planner) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — three guarded boundaries, fail-closed, each with executable evidence |
 
 ---
 
@@ -187,9 +187,10 @@ against obstacles, which is the most likely superlinear cost.
 **Suggested fix.** Add a scripted large-drawing timing check before claiming any scale
 limit.
 
-## F10 — A load on a TC point is now refused by the model and the parser
+## F10 — A load on a TC point is now refused by the model, parser and import planner
 
-**Status: closed.** Enforced at both boundaries with executable coverage.
+**Status: closed.** Enforced at three guarded boundaries, each with its own executable
+coverage; the optional-resolver bypass is also fixed (see below).
 
 **Observed originally.** A TC point is documented as not load-eligible, and
 `isLoadEligible('tc') === false` was asserted by `test/schedules.test.js` test 15 and
@@ -202,6 +203,16 @@ limit.
 - A valid serialised project with a load on `dst:r3` → `parseProjectJson` returned
   **`ok: true`** and kept the load.
 
+**A second weakness, found during review of the first fix.** The first fix made
+`lookupNode` *optional*: a caller that omitted it skipped the eligibility check entirely.
+A check that can be forgotten is not a guarantee, so the model boundary could still be
+bypassed by omission. It now fails closed — the resolver is **required**, and both a
+missing resolver and an unresolved target refuse the load (`MISSING_NODE_RESOLVER` and
+`UNRESOLVED_LOAD_TARGET` respectively), before the `INELIGIBLE_LOAD_TARGET` check for a
+resolved but ineligible point. The unguarded primitive was split out as
+`insertLoadRecord()`, named so that calling it is a visible decision; it is for
+restoring known-valid records only, and no user-reachable action calls it directly.
+
 **Impact.** Low for normal use — the dropdown offered only eligible points, so the UI
 could not produce this state. It mattered because the project file is the more permissive
 interface (see [Known limitations §10](10-limitations.md#10-form-and-model-disagree-in-two-places)):
@@ -213,17 +224,34 @@ load on a TC point is refused by the data model, not placed anyway"* but asserte
 ("the eligibility predicate excludes a TC point from carrying a load"), and the real
 model-refusal test now lives in `test/load_eligibility.test.js`.
 
-**Fix.** `addLoad()` accepts an optional `lookupNode` resolver and refuses a target whose
-`nodeType` is ineligible, returning `{ok: false, code: 'INELIGIBLE_LOAD_TARGET'}` without
-touching the input list. The panel supplies a canonicalising resolver. The project parser
-refuses a file carrying such a load in `validateMeasuredData()`, after building the
-registry, returning `INELIGIBLE_LOAD_TARGET` and nothing to apply.
+**Fix.** Three guarded boundaries, distinguished in the docs so none is claimed to do
+another's job:
 
-**A bug the new test caught.** The first attempt resolved the target with
+1. `addLoad()` — the model operation. Fails closed: refuses with
+   `MISSING_NODE_RESOLVER` when no resolver is supplied, `UNRESOLVED_LOAD_TARGET` when
+   the id resolves to nothing, and `INELIGIBLE_LOAD_TARGET` when the point cannot carry a
+   load. The input list is never mutated. The panel supplies a canonicalising resolver.
+2. Project parser (`validateMeasuredData`) — refuses the whole file with
+   `INELIGIBLE_LOAD_TARGET`, nothing to apply.
+3. Schedule import planner (`parseNodeLoadImport`) — refuses the row during planning,
+   before any plan exists, reported as `bad-value` with a detail naming the TC rule.
+   This is the shared planner behind both CSV import and clipboard paste.
+
+`insertLoadRecord()` and `applyNodeLoadPlan()` are **unguarded by design** and are not
+counted as boundaries: the first is the primitive beneath `addLoad()`, the second trusts
+a plan the planner already validated.
+
+**A bug the new tests caught.** The first attempt resolved the target with
 `registry.nodeAsset(id)`, which only knows canonical ids, so an **aliased coordinate
 spelling** of the same TC node returned `null` and the check was silently skipped. Both
-the parser and the panel now canonicalise first (`canonicalNodeId`), and
-test 7 pins that the alias is refused.
+the parser and the panel now canonicalise first (`canonicalNodeId`), and tests pin that
+the alias is refused at the model, the parser and the import planner.
+
+**Import-planner coverage.** The import path now has its own test (test 8) that drives
+`parseNodeLoadImport` with real delimited text and a canonicalising resolver — the same
+function CSV import and clipboard paste share — rather than hand-building a plan. A
+separate test (test 9) pins that an aliased spelling is refused for *ineligibility*, not
+for being unrecognised.
 
 **Compatibility.** A saved file that already contains a TC load is now refused with a
 clear message naming the record and the point. Parsing is all-or-nothing, so nothing is

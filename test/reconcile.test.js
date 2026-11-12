@@ -14,7 +14,7 @@ import test from 'node:test';
 
 import { buildNetwork } from '../src/geometry/network.js';
 import { buildAssetRegistry, reconcile } from '../src/geometry/assets.js';
-import { addLoad, createLoadSchedule, createSpanLengths, setSpanLength } from '../src/data/schedules.js';
+import { createLoadSchedule, createSpanLengths, insertLoadRecord, setSpanLength } from '../src/data/schedules.js';
 
 const MAIN = [
   { id: 'route-1', from: 'origin', direction: 'east', spans: 3, tc: false, fpb: false },
@@ -32,7 +32,7 @@ test('1. deleting a branch leaves its loads unresolved, not reassigned', () => {
   const branchNode = withBranch.allNodeAssets().find((a) => a.id.startsWith('mid:route-2:'));
   assert.ok(branchNode, 'the branch has its own pole');
 
-  const loads = addLoad(createLoadSchedule(), { nodeId: branchNode.id, value: 25 }).loads;
+  const loads = insertLoadRecord(createLoadSchedule(), { nodeId: branchNode.id, value: 25 }).loads;
 
   // Remove the branch.
   const without = registryFor([MAIN[0]]);
@@ -44,7 +44,7 @@ test('1. deleting a branch leaves its loads unresolved, not reassigned', () => {
 
 test('2. an unrelated edit leaves every record resolved', () => {
   const before = registryFor(MAIN);
-  const loads = addLoad(createLoadSchedule(), {
+  const loads = insertLoadRecord(createLoadSchedule(), {
     nodeId: before.allNodeAssets()[1].id,
     value: 10,
   }).loads;
@@ -76,7 +76,7 @@ test('4. a load on a shared pole is not orphaned when its own branch goes', () =
   const junction = before.allNodeAssets().find((a) => a.id === 'dst:route-1');
   assert.ok(junction);
 
-  const loads = addLoad(createLoadSchedule(), { nodeId: junction.id, value: 15 }).loads;
+  const loads = insertLoadRecord(createLoadSchedule(), { nodeId: junction.id, value: 15 }).loads;
   const after = registryFor([MAIN[0]]);
   const result = reconcile(after, loads, []);
   assert.equal(result.unresolvedLoads.length, 0, 'the surviving pole still owns the record');
@@ -86,7 +86,7 @@ test('5. reconciliation never reports a record as resolved by coincidence', () =
   // Replacing the whole drawing with a different one must not make the old
   // records look valid just because some new node exists.
   const before = registryFor(MAIN);
-  const loads = addLoad(createLoadSchedule(), { nodeId: 'dst:route-2', value: 20 }).loads;
+  const loads = insertLoadRecord(createLoadSchedule(), { nodeId: 'dst:route-2', value: 20 }).loads;
 
   const other = registryFor([
     { id: 'route-9', from: 'origin', direction: 'west', spans: 4, tc: false, fpb: false },
@@ -100,7 +100,7 @@ test('6. everything resolves again when the branch is re-added', () => {
   // recreates the same asset ids, so the record finds its pole again.
   const before = registryFor(MAIN);
   const target = before.allNodeAssets().find((a) => a.id === 'mid:route-2:1');
-  const loads = addLoad(createLoadSchedule(), { nodeId: target.id, value: 12 }).loads;
+  const loads = insertLoadRecord(createLoadSchedule(), { nodeId: target.id, value: 12 }).loads;
 
   const gone = reconcile(registryFor([MAIN[0]]), loads, []);
   assert.equal(gone.unresolvedLoads.length, 1);
@@ -112,8 +112,8 @@ test('6. everything resolves again when the branch is re-added', () => {
 test('7. an empty drawing orphans every record rather than dropping them', () => {
   const before = registryFor(MAIN);
   let loads = createLoadSchedule();
-  loads = addLoad(loads, { nodeId: 'dst:route-1', value: 5 }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:route-2', value: 6 }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:route-1', value: 5 }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:route-2', value: 6 }).loads;
 
   const result = reconcile(registryFor([]), loads, []);
   assert.equal(result.unresolvedLoads.length, 2, 'both are kept and reported');

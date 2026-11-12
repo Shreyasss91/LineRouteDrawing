@@ -299,6 +299,18 @@ Nothing is returned half-applied.
 | `BAD_DESIGNATIONS` | measured | `nodeDesignations` present but not a table |
 | `INVALID_MEASUREMENTS` | measured | any collected problem: a load with no id, a duplicate load id, no `nodeId`, a value not `> 0`, an unknown unit, a span length not `> 0` |
 | `INELIGIBLE_LOAD_TARGET` | measured | a load whose resolved point cannot carry one — a live TC point. Resolved through the asset registry, so an aliased spelling is caught too. Distinct from an orphan, which is kept |
+
+Two further codes belong to the **model operation** `addLoad()`, not to the file parser, and
+exist so that the eligibility check cannot be skipped by omission:
+
+| Code | Cause |
+| --- | --- |
+| `MISSING_NODE_RESOLVER` | `addLoad()` was called without a `lookupNode` resolver, so the point type cannot be established. A caller error; fails closed |
+| `UNRESOLVED_LOAD_TARGET` | the resolver returned nothing for the id, or the id is empty, so eligibility cannot be established. Fails closed |
+
+The schedule import planner rejects an ineligible row under its own `bad-value` code with
+a detail naming the TC rule, because the whole-import refusal codes are about the file
+text rather than about one target.
 | `DUPLICATE_DESIGNATION` | designations | two **different coordinates** carry the same name |
 
 Two deliberate behaviours:

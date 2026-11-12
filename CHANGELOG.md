@@ -15,6 +15,49 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ## Unreleased
 
+### Changed
+
+- **`addLoad()` now fails closed.** The `lookupNode` resolver was optional, so a caller
+  that omitted it skipped the eligibility check entirely and could still create a load on
+  a TC point — the model boundary was bypassable by omission. The resolver is now
+  **required**: a missing resolver returns `MISSING_NODE_RESOLVER` and an id that resolves
+  to nothing returns `UNRESOLVED_LOAD_TARGET`, both before the
+  `INELIGIBLE_LOAD_TARGET` check. Input-list immutability and canonical/alias handling are
+  unchanged.
+- The unguarded primitive is split out as **`insertLoadRecord()`**, named so that calling
+  it is a visible decision. It is for restoring known-valid records and for `addLoad()`
+  after approval; no user-reachable action calls it directly.
+- The import staging paths in `network_panel.js` now reuse the same canonicalising
+  `lookupNode` the form uses, instead of a local exact-id `find`, so an aliased coordinate
+  spelling is refused for *ineligibility* rather than dismissed as "not in this drawing".
+- `test/schedules.test.js`, `test/reconcile.test.js` and `test/schedule_io.test.js` moved
+  to `insertLoadRecord()`, because they exercise record handling (values, units, ids,
+  callouts, reconciliation) rather than the eligibility rule. This keeps the two concerns
+  separate.
+- Documentation now distinguishes the four levels explicitly — the guarded model
+  operation, the project parser, the import planner, and the raw applier that trusts an
+  already validated plan — instead of implying all four enforce eligibility.
+
+### Added
+
+- `test/load_eligibility.test.js` grown from 10 to 14 tests: missing resolver (including
+  non-function values), unresolvable target, a target with no `nodeType`, and a real
+  `parseNodeLoadImport` test driving delimited text through the **shared** CSV/clipboard
+  planner rather than a hand-built plan.
+
+### Fixed
+
+- The import path's eligibility check is now proven by a test of the actual planner. The
+  previous test 8 built a project document and called the applier directly, which did not
+  exercise `context.isEligible` at all.
+
+### Validation
+
+- `npm test` → 472 tests, 472 pass, 0 fail (was 468).
+- `npm run test:browser` → 221/221 checks passed.
+- Mutation evidence: disabling the fail-closed guards fails tests 13 and 14; disabling the
+  import planner's `isEligible` check fails tests 8 and 9. Source restored and re-verified.
+
 ### Added
 
 - `test/load_eligibility.test.js` — 10 tests pinning the two boundaries that refuse a

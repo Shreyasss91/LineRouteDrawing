@@ -250,9 +250,10 @@ export function createNetworkPanel(options) {
    * cancel or close the page.
    */
   function stageImport(kind, text) {
-    const nodes = nodeAssets();
     const spans = spanAssets();
-    const lookupNode = (id) => nodes.find((n) => n.id === id) ?? null;
+    // Canonicalising lookup, the same one the form uses, so an aliased spelling of a
+    // point is judged by what it resolves to and not rejected as "not in this drawing".
+    const lookupNodeForImport = (id) => lookupNode(id);
     const lookupSpan = (id) => spans.find((s) => s.id === id) ?? null;
     const s = state();
 
@@ -260,7 +261,7 @@ export function createNetworkPanel(options) {
       kind === 'loads'
         ? parseNodeLoadImport(text, {
             loads: s.loads,
-            lookupNode,
+            lookupNode: lookupNodeForImport,
             isEligible: (type) => isLoadEligible(type),
             mode: currentMode(),
           })
@@ -338,11 +339,10 @@ export function createNetworkPanel(options) {
     if (stagedKind === 'loads') {
       // Re-plan against the chosen mode, so switching to "update" after staging
       // honours the smaller change set the user actually asked for.
-      const nodes = nodeAssets();
-      const lookupNode = (id) => nodes.find((n) => n.id === id) ?? null;
+      const lookupNodeForImport = (id) => lookupNode(id);
       const parsed = parseNodeLoadImport(staged.text, {
         loads: s.loads,
-        lookupNode,
+        lookupNode: lookupNodeForImport,
         isEligible: (type) => isLoadEligible(type),
         mode: plan.mode,
       });

@@ -82,7 +82,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Default unit kVA | Verified | `schedules.test.js` | — |
 | One callout per pole with one line per record | Verified | `browser` "one callout shows all three loads, unsummed", `annotations.test.js` | — |
 | Loads never summed, never converted | Verified | `schedules.test.js` | **By design**; see `10-limitations.md` §4 |
-| TC not load-eligible | Verified | `load_eligibility.test.js` tests 1–10 exercise the real refusals at both boundaries; `schedules.test.js` test 15 and `annotations.test.js` test 27 pin the predicate | `addLoad()` refuses (via `lookupNode`), the project parser refuses with `INELIGIBLE_LOAD_TARGET`, and the schedule importer refuses the row. Aliased coordinate spellings are caught too |
+| TC not load-eligible | Verified | `load_eligibility.test.js` (14 tests) drives all three guarded boundaries; `schedules.test.js` test 15 and `annotations.test.js` test 27 pin the predicate | `addLoad()` fails closed (`MISSING_NODE_RESOLVER`, `UNRESOLVED_LOAD_TARGET`, `INELIGIBLE_LOAD_TARGET`); the project parser refuses the file; `parseNodeLoadImport` refuses the row before a plan exists. Targets resolved through the asset registry, so aliased spellings are judged by what they resolve to. `insertLoadRecord()` and `applyNodeLoadPlan()` are unguarded by design and are not counted here |
 | Value must be `> 0` (zero refused) | Verified | `schedules.test.js` | Blank means "no load" |
 | Editing a load's value in place | Verified | `network_panel.js`, `schedules.test.js` | — |
 | Reassign an unresolved load | Verified | `schedules.test.js`, `reconcile.test.js` | Keeps id and value |

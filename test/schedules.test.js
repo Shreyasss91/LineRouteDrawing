@@ -8,6 +8,12 @@
  *   - A physical length is not the drawing's spacing. Changing a measured length
  *     moves nothing, and the default-length shortcut never overwrites a number
  *     somebody measured by hand.
+ *
+ * These tests use `insertLoadRecord`, the unguarded primitive, because they exercise
+ * record handling - values, units, ids, callouts - and not the eligibility rule. The
+ * eligibility rule has its own suite in `load_eligibility.test.js`, which drives the
+ * guarded `addLoad()`. Using the primitive here keeps the two concerns separate and
+ * means a change to eligibility cannot break a value-parsing test for the wrong reason.
  */
 
 import assert from 'node:assert/strict';
@@ -17,7 +23,7 @@ import {
   DEFAULT_LOAD_UNIT,
   LOAD_UNITS,
   SPAN_UNIT,
-  addLoad,
+  insertLoadRecord,
   applyDefaultLength,
   clearSpanLength,
   createLoadSchedule,
@@ -46,7 +52,7 @@ import {
 /* ------------------------------------------------------------------ */
 
 test('1. a load is recorded against a node asset id', () => {
-  const result = addLoad(createLoadSchedule(), { nodeId: 'dst:r1', value: 25 });
+  const result = insertLoadRecord(createLoadSchedule(), { nodeId: 'dst:r1', value: 25 });
   assert.equal(result.ok, true);
   assert.equal(result.loads.length, 1);
   assert.deepEqual(result.loads[0], {
@@ -59,14 +65,14 @@ test('1. a load is recorded against a node asset id', () => {
 
 test('2. the default unit is kVA', () => {
   assert.equal(DEFAULT_LOAD_UNIT, 'kVA');
-  const { loads } = addLoad(createLoadSchedule(), { nodeId: 'dst:r1', value: 3 });
+  const { loads } = insertLoadRecord(createLoadSchedule(), { nodeId: 'dst:r1', value: 3 });
   assert.equal(loads[0].unit, 'kVA');
 });
 
 test('3. every supported unit is accepted', () => {
   assert.deepEqual([...LOAD_UNITS], ['kVA', 'kW', 'kVAr', 'HP']);
   for (const unit of LOAD_UNITS) {
-    const result = addLoad(createLoadSchedule(), { nodeId: 'dst:r1', value: 10, unit });
+    const result = insertLoadRecord(createLoadSchedule(), { nodeId: 'dst:r1', value: 10, unit });
     assert.equal(result.ok, true, `${unit} is accepted`);
     assert.equal(result.loads[0].unit, unit);
   }
@@ -81,7 +87,7 @@ test('4. units are matched without case sensitivity', () => {
 });
 
 test('5. an unknown unit is refused rather than guessed at', () => {
-  const result = addLoad(createLoadSchedule(), { nodeId: 'dst:r1', value: 4, unit: 'kWh' });
+  const result = insertLoadRecord(createLoadSchedule(), { nodeId: 'dst:r1', value: 4, unit: 'kWh' });
   assert.equal(result.ok, false);
   assert.match(result.message, /kVA, kW, kVAr, HP/);
 });
@@ -89,9 +95,9 @@ test('5. an unknown unit is refused rather than guessed at', () => {
 test('6. several loads with different units stay separate records', () => {
   // The worked example from the requirement: an FPB holding 25 kVA, 5 kW and 12 HP.
   let loads = createLoadSchedule();
-  loads = addLoad(loads, { nodeId: 'dst:fpb', value: 25, unit: 'kVA' }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:fpb', value: 5, unit: 'kW' }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:fpb', value: 12, unit: 'HP' }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:fpb', value: 25, unit: 'kVA' }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:fpb', value: 5, unit: 'kW' }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:fpb', value: 12, unit: 'HP' }).loads;
 
   assert.equal(loads.length, 3, 'three records, not one total');
   assert.equal(new Set(loads.map((l) => l.id)).size, 3, 'each has its own id');
@@ -109,7 +115,7 @@ test('6. several loads with different units stay separate records', () => {
 
 test('7. a load value must be a positive number', () => {
   for (const bad of [0, -1, 'zero', '', null, NaN, Infinity]) {
-    const result = addLoad(createLoadSchedule(), { nodeId: 'dst:r1', value: bad });
+    const result = insertLoadRecord(createLoadSchedule(), { nodeId: 'dst:r1', value: bad });
     assert.equal(result.ok, false, `${String(bad)} is refused`);
   }
   assert.equal(parseLoadValue('12.5').value, 12.5, 'decimals are accepted');
@@ -117,9 +123,9 @@ test('7. a load value must be a positive number', () => {
 
 test('8. the callout shows one line per record, never a total', () => {
   let loads = createLoadSchedule();
-  loads = addLoad(loads, { nodeId: 'dst:fpb', value: 25, unit: 'kVA' }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:fpb', value: 5, unit: 'kW' }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:fpb', value: 12, unit: 'HP' }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:fpb', value: 25, unit: 'kVA' }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:fpb', value: 5, unit: 'kW' }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:fpb', value: 12, unit: 'HP' }).loads;
 
   assert.deepEqual(loadCalloutLines(loads, 'dst:fpb'), ['25 kVA', '5 kW', '12 HP']);
   // No summed line appears, because kVA and HP cannot be added.
@@ -128,8 +134,8 @@ test('8. the callout shows one line per record, never a total', () => {
 
 test('9. loads belong to their node and nowhere else', () => {
   let loads = createLoadSchedule();
-  loads = addLoad(loads, { nodeId: 'dst:r1', value: 10 }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:r2', value: 20 }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:r1', value: 10 }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:r2', value: 20 }).loads;
 
   assert.equal(loadsForNode(loads, 'dst:r1').length, 1);
   assert.equal(loadsForNode(loads, 'dst:r1')[0].value, 10);
@@ -138,7 +144,7 @@ test('9. loads belong to their node and nowhere else', () => {
 });
 
 test('10. editing a value does not move the load', () => {
-  let loads = addLoad(createLoadSchedule(), { nodeId: 'dst:r1', value: 10 }).loads;
+  let loads = insertLoadRecord(createLoadSchedule(), { nodeId: 'dst:r1', value: 10 }).loads;
   const id = loads[0].id;
   const result = updateLoad(loads, id, { value: 15, unit: 'kW' });
   assert.equal(result.ok, true);
@@ -149,7 +155,7 @@ test('10. editing a value does not move the load', () => {
 });
 
 test('11. moving a load is a separate, explicit action', () => {
-  let loads = addLoad(createLoadSchedule(), { nodeId: 'dst:r1', value: 10 }).loads;
+  let loads = insertLoadRecord(createLoadSchedule(), { nodeId: 'dst:r1', value: 10 }).loads;
   const id = loads[0].id;
   const result = reassignLoad(loads, id, 'dst:r2');
   assert.equal(result.ok, true);
@@ -159,9 +165,9 @@ test('11. moving a load is a separate, explicit action', () => {
 
 test("12. a record can be removed, and a node's records removed together", () => {
   let loads = createLoadSchedule();
-  loads = addLoad(loads, { nodeId: 'dst:r1', value: 10 }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:r1', value: 20 }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:r2', value: 30 }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:r1', value: 10 }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:r1', value: 20 }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:r2', value: 30 }).loads;
 
   const oneRemoved = removeLoad(loads, loads[0].id);
   assert.equal(oneRemoved.length, 2, 'only one record went');
@@ -174,8 +180,8 @@ test("12. a record can be removed, and a node's records removed together", () =>
 
 test('13. load ids are unique and are not derived from the node', () => {
   let loads = createLoadSchedule();
-  loads = addLoad(loads, { nodeId: 'dst:r1', value: 1 }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:r1', value: 2 }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:r1', value: 1 }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:r1', value: 2 }).loads;
   const ids = loads.map((l) => l.id);
   assert.equal(new Set(ids).size, 2);
   for (const id of ids) {

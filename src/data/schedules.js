@@ -194,43 +194,29 @@ export function loadsForNode(loads, nodeId) {
 }
 
 /**
- * Add a load record to a node.
+ * Insert a load record without checking what kind of point it targets.
  *
- * Returns a new list; the input is never mutated, so a caller can stage an edit
- * and discard it without having to undo anything.
+ * **Trusted callers only.** This is the primitive behind `addLoad()`, separated out so
+ * the eligibility rule has exactly one place to be enforced instead of several
+ * near-copies. It exists for two situations: `addLoad()` itself, after it has resolved
+ * and approved the target, and restoring a record that is already known to be valid.
  *
- * A TC point is not a load-bearing asset, so a load on one is refused here rather
- * than only in the form. The check needs to know what kind of point the id names,
- * which is the registry's job, so the caller supplies `lookupNode`. When it is
- * omitted the type cannot be known and the eligibility test is skipped - that
- * keeps this module free of a dependency on the geometry layer, and the project
- * parser and the schedule importer enforce the same rule at their own boundaries.
+ * It is deliberately named so that calling it is a visible decision. Nothing that a
+ * user's action can reach should call it directly - use `addLoad()`, which fails closed.
  *
  * @param {Array<object>} loads Current records.
  * @param {object} input
- * @param {string} input.nodeId Node asset id.
+ * @param {string} input.nodeId Node asset id, already validated.
  * @param {unknown} input.value Numeric value.
  * @param {unknown} [input.unit] Unit, defaults to kVA.
  * @param {string} [input.id] Explicit id, for a restored record.
- * @param {(nodeId: string) => ({nodeType?: string} | null)} [input.lookupNode]
- *   Resolve an asset id to its node, so eligibility can be checked.
  * @returns {{ok: true, loads: Array<object>, record: object}
- *   | {ok: false, code?: string, message: string}}
+ *   | {ok: false, message: string}}
  */
-export function addLoad(loads, input = {}) {
+export function insertLoadRecord(loads, input = {}) {
   const nodeId = input.nodeId;
   if (!isAssetIdLike(nodeId)) {
     return { ok: false, message: 'A load must belong to a point.' };
-  }
-  // Refuse a point that cannot carry a load. Only done when the caller can tell us
-  // the node type, so this never invents a verdict from an id alone.
-  const target = typeof input.lookupNode === 'function' ? input.lookupNode(nodeId) : null;
-  if (target && isLoadEligible(target.nodeType) === false) {
-    return {
-      ok: false,
-      code: 'INELIGIBLE_LOAD_TARGET',
-      message: `A load cannot be recorded on a ${target.nodeType} point. Choose a pole, an FPB or the Origin.`,
-    };
   }
   const parsed = parseLoadValue(input.value);
   if (!parsed.ok) return { ok: false, message: parsed.message };
@@ -248,6 +234,84 @@ export function addLoad(loads, input = {}) {
   };
   return { ok: true, loads: [...loads, record], record };
 }
+
+/**
+ * Add a load record to a point, refusing any point that cannot carry one.
+ *
+ * Returns a new list; the input is never mutated, so a caller can stage an edit and
+ * discard it without having to undo anything.
+ *
+ * **This operation fails closed.** A TC point is not a load-bearing asset, so the
+ * target's type has to be known before a load can be recorded, and the caller supplies
+ * that knowledge as `lookupNode`. The check is mandatory rather than optional: if the
+ * resolver is missing, or it cannot resolve the id, no load is created. An optional
+ * check is not a guarantee - a caller that forgot the resolver would silently be allowed
+ * to put a load on a TC point, which is the defect this function exists to prevent.
+ *
+ * The resolver is injected rather than imported so this module keeps no dependency on
+ * the geometry layer (see the dependency rules in `documentation/03-architecture.md`).
+ *
+ * Errors are distinguished, because the three failures need different responses:
+ *
+ *   `MISSING_NODE_RESOLVER`  a programming error - the caller must pass a resolver
+ *   `UNRESOLVED_LOAD_TARGET` the id names no point in this drawing
+ *   `INELIGIBLE_LOAD_TARGET` the point exists but cannot carry a load
+ *
+ * @param {Array<object>} loads Current records.
+ * @param {object} input
+ * @param {string} input.nodeId Node asset id.
+ * @param {unknown} input.value Numeric value.
+ * @param {unknown} [input.unit] Unit, defaults to kVA.
+ * @param {string} [input.id] Explicit id, for a restored record.
+ * @param {(nodeId: string) => ({nodeType?: string} | null)} input.lookupNode
+ *   Resolve an asset id to its node. Required: a load cannot be created without it.
+ * @returns {{ok: true, loads: Array<object>, record: object}
+ *   | {ok: false, code: string, message: string}}
+ */
+export function addLoad(loads, input = {}) {
+  const nodeId = input.nodeId;
+  if (!isAssetIdLike(nodeId)) {
+    return { ok: false, code: 'UNRESOLVED_LOAD_TARGET', message: 'A load must belong to a point.' };
+  }
+
+  // Fail closed: without a way to resolve the point there is no way to know whether it
+  // may carry a load, so nothing is created. This is a caller error, not user input.
+  if (typeof input.lookupNode !== 'function') {
+    return {
+      ok: false,
+      code: 'MISSING_NODE_RESOLVER',
+      message:
+        'A load cannot be recorded without a way to look up its point. ' +
+        'Pass `lookupNode` so the point type can be checked.',
+    };
+  }
+
+  const target = input.lookupNode(nodeId);
+  // Fail closed again: an id that resolves to nothing cannot be shown to be eligible.
+  if (!target) {
+    return {
+      ok: false,
+      code: 'UNRESOLVED_LOAD_TARGET',
+      message: 'That point is not in this drawing, so a load cannot be recorded on it.',
+    };
+  }
+  if (isLoadEligible(target.nodeType) === false) {
+    return {
+      ok: false,
+      code: 'INELIGIBLE_LOAD_TARGET',
+      message: `A load cannot be recorded on a ${target.nodeType} point. Choose a pole, an FPB or the Origin.`,
+    };
+  }
+
+  return insertLoadRecord(loads, input);
+}
+
+/**
+ * Backwards-compatible alias retained for callers written against the previous name.
+ *
+ * @deprecated Use `insertLoadRecord`, which says in its name that the target is not checked.
+ */
+export const addLoadUnchecked = insertLoadRecord;
 
 /**
  * Replace one record's value and unit, addressed by its own id.

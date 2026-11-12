@@ -28,7 +28,7 @@ import {
   toDelimited,
 } from '../src/data/schedule_io.js';
 import {
-  addLoad,
+  insertLoadRecord,
   createLoadSchedule,
   createSpanLengths,
   nextLoadId,
@@ -56,9 +56,9 @@ const eligible = (type) => type !== 'tc';
 
 function threeLoads() {
   let loads = createLoadSchedule();
-  loads = addLoad(loads, { nodeId: 'dst:r2', value: 25, unit: 'kVA' }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:r2', value: 5, unit: 'kW' }).loads;
-  loads = addLoad(loads, { nodeId: 'dst:r2', value: 12, unit: 'HP' }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:r2', value: 25, unit: 'kVA' }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:r2', value: 5, unit: 'kW' }).loads;
+  loads = insertLoadRecord(loads, { nodeId: 'dst:r2', value: 12, unit: 'HP' }).loads;
   return loads;
 }
 

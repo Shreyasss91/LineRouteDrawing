@@ -29,7 +29,7 @@ import { buildAssetRegistry } from '../src/geometry/assets.js';
 import { buildNetwork } from '../src/geometry/network.js';
 import { addLoad, isLoadEligible } from '../src/data/schedules.js';
 import { parseProjectJson, serializeProjectJson } from '../src/ui/project.js';
-import { applyNodeLoadPlan } from '../src/data/schedule_io.js';
+import { applyNodeLoadPlan, parseNodeLoadImport } from '../src/data/schedule_io.js';
 
 const FIXED_DATE = new Date('2026-07-08T09:10:11.000Z');
 
@@ -202,25 +202,75 @@ test('7. eligibility is decided by canonical identity, not by the id text', () =
   assert.equal(parsed.code, 'INELIGIBLE_LOAD_TARGET');
 });
 
-test('8. the schedule import and apply path cannot introduce a TC load', () => {
+test('8. the shared CSV/clipboard import planner refuses a TC target', () => {
   const f = fixture();
-  // The importer refuses the row before a plan exists, so a TC target never
-  // reaches `applyNodeLoadPlan` through the supported import path.
-  const document = documentWith([{ id: 'load-1', nodeId: f.tc.id, value: 10, unit: 'kVA' }]);
-  assert.equal(parseProjectJson(JSON.stringify(document)).code, 'INELIGIBLE_LOAD_TARGET');
-
-  // `applyNodeLoadPlan` is a pure applier and deliberately does not re-check, so
-  // the guard has to be upstream - which is what the assertions above establish.
-  // Recording that contract here stops a future change from removing the upstream
-  // guard on the assumption that the applier catches it.
-  const applied = applyNodeLoadPlan([], {
+  // CSV import and clipboard paste both go through `parseNodeLoadImport`, so this
+  // exercises the real planner the two front ends share rather than a hand-built plan.
+  const context = {
+    loads: [],
+    lookupNode: f.lookupNode,
+    isEligible: (type) => isLoadEligible(type),
     mode: 'replace',
-    records: [{ id: 'load-1', nodeId: f.tc.id, value: 10, unit: 'kVA' }],
-  }, () => 'load-new');
+  };
+
+  const csv = ['nodeid,value,unit', `${f.tc.id},10,kVA`].join('\n');
+  const refused = parseNodeLoadImport(csv, context);
+  assert.equal(refused.ok, false, 'the importer must refuse the row');
+  assert.equal(refused.code, 'bad-value', 'a refused import reports a value-level failure');
+  assert.match(refused.message, /nothing has been changed/i);
+  assert.match((refused.details ?? []).join(' '), /tc point/i, 'the detail names the TC rule');
+  assert.equal(refused.plan, undefined, 'no plan is produced for an invalid import');
+
+  // Tab-separated paste takes the same route.
+  const tsv = ['nodeid\tvalue\tunit', `${f.tc.id}\t10\tkVA`].join('\n');
+  const refusedTsv = parseNodeLoadImport(tsv, context);
+  assert.equal(refusedTsv.ok, false, 'the pasted form is refused too');
+  assert.equal(refusedTsv.plan, undefined);
+
+  // An eligible target is still accepted by the same planner, so the refusal is about
+  // the target and not about importing in general.
+  const good = ['nodeid,value,unit', `${f.pole.id},10,kVA`].join('\n');
+  const accepted = parseNodeLoadImport(good, context);
+  assert.equal(accepted.ok, true, 'an eligible target imports normally');
+  assert.equal(accepted.plan.records.length, 1);
+  assert.equal(accepted.plan.records[0].nodeId, f.pole.id);
+});
+
+test('9. the aliased spelling of a TC point is refused by the import planner', () => {
+  const f = fixture();
+  const tcKey = f.registry.nodeKeys.get(f.tc.id);
+  assert.equal(f.registry.canonicalNodeId(tcKey), f.tc.id, 'the key resolves to the TC');
+  // A coordinate key contains a comma (`2,-2`), so it can only survive as one field in
+  // a tab-separated import. That is exactly the clipboard-paste shape.
+  const tsv = ['nodeid\tvalue\tunit', `${tcKey}\t10\tkVA`].join('\n');
+  const refused = parseNodeLoadImport(tsv, {
+    loads: [],
+    lookupNode: f.lookupNode,
+    isEligible: (type) => isLoadEligible(type),
+    mode: 'replace',
+  });
+  assert.equal(refused.ok, false, 'the alias is refused for ineligibility');
+  assert.match(
+    (refused.details ?? []).join(' '),
+    /tc point/i,
+    'refused because it is a TC, not because it was unrecognised',
+  );
+});
+
+test('10. the raw applier trusts its plan, so the planner is the real boundary', () => {
+  const f = fixture();
+  // `applyNodeLoadPlan` is a pure applier with no registry, so by design it cannot
+  // re-check eligibility. Recording that here stops a future change from removing the
+  // upstream guard on the assumption that the applier catches it.
+  const applied = applyNodeLoadPlan(
+    [],
+    { mode: 'replace', records: [{ id: 'load-1', nodeId: f.tc.id, value: 10, unit: 'kVA' }] },
+    () => 'load-new',
+  );
   assert.equal(applied.loads.length, 1, 'the applier trusts its validated plan');
 });
 
-test('9. an invalid load refuses the whole file and protects what is stored', () => {
+test('11. an invalid load refuses the whole file and protects what is stored', () => {
   const f = fixture();
   // One good load and one on a TC: the good one must not be applied either, and
   // the project must not be returned in any partially fixed-up form.
@@ -239,7 +289,7 @@ test('9. an invalid load refuses the whole file and protects what is stored', ()
   assert.match(parsed.message, /load-2/);
 });
 
-test('10. an unknown node id is still accepted as unresolved, not refused as ineligible', () => {
+test('12. an unknown node id is still accepted as unresolved, not refused as ineligible', () => {
   const f = fixture();
   // A load pointing at a point the drawing no longer has is the user's data and is
   // kept for reassignment. Only a *live* TC point refuses the file.
@@ -252,4 +302,55 @@ test('10. an unknown node id is still accepted as unresolved, not refused as ine
     parsed.warnings.some((w) => /no longer has/.test(w)),
     'the orphan is reported as a warning',
   );
+});
+
+test('13. the model fails closed when no resolver is supplied', () => {
+  const f = fixture();
+  // Omitting the resolver used to skip the eligibility check entirely, so a caller that
+  // forgot it could create a load on a TC point. The check is now mandatory.
+  const omitted = addLoad([], { nodeId: f.tc.id, value: 10, unit: 'kVA' });
+  assert.equal(omitted.ok, false, 'a load cannot be created without a resolver');
+  assert.equal(omitted.code, 'MISSING_NODE_RESOLVER');
+  assert.equal(omitted.loads, undefined);
+  assert.equal(omitted.record, undefined);
+
+  // Not every non-function is a resolver either.
+  for (const bogus of [null, undefined, 'lookup', 42, {}]) {
+    const result = addLoad([], { nodeId: f.pole.id, value: 10, unit: 'kVA', lookupNode: bogus });
+    assert.equal(result.ok, false, `lookupNode: ${JSON.stringify(bogus)} must fail closed`);
+    assert.equal(result.code, 'MISSING_NODE_RESOLVER');
+  }
+
+  // The bypass is specifically that an eligible-looking id is not enough on its own.
+  const noResolverPole = addLoad([], { nodeId: f.pole.id, value: 10, unit: 'kVA' });
+  assert.equal(noResolverPole.ok, false, 'even an eligible id needs a resolver');
+});
+
+test('14. the model fails closed when the resolver cannot resolve the target', () => {
+  const f = fixture();
+  // A resolver that returns nothing tells us the id names no point, so eligibility
+  // cannot be established and the operation must not proceed.
+  const result = addLoad([], {
+    nodeId: 'dst:does-not-exist',
+    value: 10,
+    unit: 'kVA',
+    lookupNode: () => null,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'UNRESOLVED_LOAD_TARGET');
+  assert.equal(result.loads, undefined);
+
+  // A resolver that returns something without a nodeType cannot prove eligibility.
+  const noType = addLoad([], { nodeId: f.pole.id, value: 10, unit: 'kVA', lookupNode: () => ({}) });
+  assert.equal(noType.ok, false, 'an unknown type is not treated as eligible');
+  assert.equal(noType.code, 'INELIGIBLE_LOAD_TARGET');
+
+  // The real resolver, for contrast, resolves it and accepts.
+  const resolved = addLoad([], {
+    nodeId: f.pole.id,
+    value: 10,
+    unit: 'kVA',
+    lookupNode: f.lookupNode,
+  });
+  assert.equal(resolved.ok, true);
 });
