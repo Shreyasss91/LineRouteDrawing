@@ -9,6 +9,26 @@ for Word or PowerPoint, or printed.
 It runs entirely in the browser: no backend, no database, no network access at
 runtime, no build step.
 
+## Documentation
+
+The full documentation set lives in [`documentation/`](documentation/README.md):
+
+| Document | Covers |
+| --- | --- |
+| [Overview and quick start](documentation/01-overview.md) | What the tool is, how to run it, the stack, a glossary |
+| [User guide](documentation/02-user-guide.md) | Every control, with what it does and what it refuses |
+| [Technical architecture](documentation/03-architecture.md) | Layers, module responsibilities, contracts, dependency rules |
+| [Route and geometry model](documentation/04-route-and-geometry.md) | Coordinates, the canonical graph, marker and clipping geometry |
+| [Persistence and project format](documentation/05-persistence.md) | The exact JSON field reference, migrations, refusal codes, recovery |
+| [Identity and network data](documentation/06-identity-and-data.md) | Asset ids, designations, loads, span lengths, reconciliation |
+| [Rendering and export](documentation/07-rendering-and-export.md) | Profiles, the four page layouts, fit-to-sheet, the `c39eca9` regression |
+| [Testing and development](documentation/08-testing.md) | Commands, the 458 Node tests and 198 browser checks, conventions |
+| [Feature and validation matrix](documentation/09-feature-matrix.md) | Every capability with its verification status |
+| [Known limitations](documentation/10-limitations.md) | What it cannot do, and what has not been validated |
+| [Findings](documentation/findings.md) | Defects and gaps recorded but deliberately not fixed |
+
+This README is the short version and remains the quickest way in.
+
 ## Running it
 
 Serve the folder over HTTP on loopback and open the address:
@@ -53,10 +73,13 @@ a cable that is already drawn.
   number that is wrong in a way nobody checks.
 - **Span lengths** - one row per physical span, in metres. Type a length, or enter a
   **Default length** and press **Apply to unmeasured spans**, which fills only the
-  blanks and never overwrites a length you typed. An unmeasured span draws no label
-  at all; it is not treated as zero and is not guessed from the drawing's spacing.
-  The spacing is a layout choice, the length is a survey, and they are stored apart
-  so changing one cannot move the other.
+  blanks and never overwrites a length you typed. An unmeasured span is drawn with a
+  dash instead of a number, as `— m`; it is not treated as zero and is never guessed
+  from the drawing's spacing. A span with no label at all would make a finished sheet
+  indistinguishable from an unsurveyed one, so the placeholder is deliberate. The
+  spacing is a layout choice, the length is a survey, and they are stored apart so
+  changing one cannot move the other. The preview also carries a
+  measurement-completeness notice, which is never exported.
 
 Both schedules can be moved to and from a spreadsheet. **Copy as spreadsheet** puts
 the table on the clipboard as a tab-separated block with its header row, ready to
@@ -162,6 +185,14 @@ resumes and the next reload restores whatever you decided on.
 | FPB boxes with label | yes | yes | yes | yes |
 | Load callouts with leader and arrow | yes | yes | yes | yes |
 | Span length labels | yes | yes | yes | yes |
+
+Span length labels appear in every output, but each obeys the **Include span
+lengths** switch in the Output panel; load callouts obey **Include node loads**.
+Both switches default to on. When one is off it affects only the exports: the
+preview and the drawing reference panel keep showing everything you entered.
+
+An unmeasured span's label reads `— m`, so an available switch never turns a missing
+measurement into a finished-looking drawing.
 
 Printing uses exactly the PDF rules. Exports hide the *drawing's own* text - the
 Origin name and the alphabetical labels - and keep everything that is a fact about
@@ -279,12 +310,12 @@ calculates a coordinate, a pole or a junction of its own.
 npm test
 ```
 
-Uses Node's built-in test runner; no dependencies to install. The suite covers
-cardinal directions, span and pole counts, alphabetical labelling, TC
-identification and naming, endpoint reuse, shared-node merging, partial and
-complete overlap, intersections, multiple branches, label visibility per
-profile, TC retention in every profile, the full example topology, sequential
-dependency errors, and deterministic recalculation after an edit.
+Uses Node's built-in test runner; no dependencies to install. **458 tests across 29
+files** cover cardinal directions, span and pole counts, alphabetical labelling, TC
+identification and naming, endpoint reuse, shared-node merging, partial and complete
+overlap, intersections, multiple branches, label visibility per profile, TC retention
+in every profile, the full example topology, sequential dependency errors, and
+deterministic recalculation after an edit.
 
 The measured data has its own coverage: stable asset identity across edits and
 removals, one span id per physical edge however many routes walk it, load records
@@ -304,8 +335,10 @@ npm run test:browser
 asserts on what a user would actually see and download: the point designations
 before and after a reload, branch numbering, span ids, the load callouts, the
 incompleteness notice, dragging an annotation and reloading, the CSV import being
-staged rather than applied, all four export switch combinations, and the content
-of the downloaded SVG and PDF.
+staged rather than applied, all four export switch combinations, the content
+of the downloaded SVG and PDF, the print sheet fitting **one page on every one of
+the four layouts**, and the TC geometry on the printed sheet. **198 checks in 11
+sections.**
 
 It needs two things that the application itself does not:
 
@@ -394,8 +427,23 @@ only browser and Node built-ins.
 
 ## Known limitations
 
+The detailed list, with what has and has not been validated, is in
+[documentation/10-limitations.md](documentation/10-limitations.md). In brief:
+
 - One drawing is exported at a time; there is no multi-sheet or paginated
-  output. Very large networks are scaled down to fit a single page.
+  output. Very large networks are scaled down to fit a single page, so the text gets
+  small; there is no warning before it stops being readable.
+- **A branch can only start from the Origin or a route destination.** Branching from
+  an intermediate pole (say `A2`) is not expressible; split the run at the branch
+  point instead.
+- **The drawing is not to scale.** Every span is drawn at the same length, so a
+  measured length is a label you read, never a distance you measure from the sheet.
+- **There is no undo**, and rows cannot be reordered. Save project before risky edits.
+- No custom paper size: A4 landscape, A4 portrait, A3 landscape, Letter landscape only.
+- A4 portrait and A3 landscape have been verified by the automated fit check only;
+  **Letter landscape** was checked by hand in the real Chrome print dialog, and
+  physical printing was validated by the user outside this repository.
+- Firefox, Safari, touch devices and mobile layouts have **not** been tested.
 - The SVG is plain vector primitives so Word and PowerPoint accept it as an
   editable drawing, but import behaviour was not verified inside Office itself.
   Office may convert imported graphics into a group of shapes, which is normal
