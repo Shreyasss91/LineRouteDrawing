@@ -291,7 +291,7 @@ Form: `#field-load-node` (Point), `#field-load-value`, `#field-load-unit`
   | `reassignLoad()` — moving an existing load | same contract as `addLoad()`, because moving a load is the other way one reaches a point; adds `UNKNOWN_LOAD` for a stale record id | `MISSING_NODE_RESOLVER`, `UNRESOLVED_LOAD_TARGET`, `INELIGIBLE_LOAD_TARGET`, `UNKNOWN_LOAD` |
   | Project parser (`validateMeasuredData`) | refuses the whole file | `INELIGIBLE_LOAD_TARGET` |
   | Schedule import planner (`parseNodeLoadImport`) | refuses the row during planning, before any plan exists; also refuses outright if it is not given both `lookupNode` and `isEligible`, since it could not verify anything | `bad-value` with a detail naming the TC rule; `missing-capability` for absent dependencies |
-  | Route edit (`handleSubmit()`) | refuses to turn a loaded destination into a TC point before anything is written, naming the load | form error: *"This route cannot be changed to a TC point while it carries a load…"* |
+  | Route edit (`handleSubmit()`) | refuses to turn a loaded destination into a TC point before anything is written, naming the load. Compares **canonical node identity** through the registry, so a load stored under a coordinate alias still counts as attached | form error: *"This route cannot be changed to a TC point while it carries a load…"* |
 
 - All four resolve the target through the asset registry, so an aliased coordinate
   spelling is judged by what it resolves to.

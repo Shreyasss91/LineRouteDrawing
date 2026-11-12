@@ -17,6 +17,51 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Fixed
 
+- **The route-edit TC guard compared identifier text, so an aliased load was missed.**
+  `5404f21` detected attached loads with `load.nodeId === destinationAssetId(routeId)`.
+  A load's `nodeId` may legally be a coordinate spelling — the registry resolves `0,-2`
+  to `dst:route-1` — and the loader keeps the spelling verbatim rather than rewriting it,
+  so those loads were not seen as attached. Reproduced with a project built by the real
+  serializer: the edit saved `tc: true`, and `parseProjectJson` then refused the file with
+  `INELIGIBLE_LOAD_TARGET` — the same data loss `5404f21` exists to prevent, through a
+  different door. The guard now resolves both the edited destination and every load's
+  target through the live registry (`canonicalNodeId`) and compares canonical identity,
+  so any accepted alias is caught.
+- **A refusal message interpolated `undefined`.** A resolver may return an object with no
+  usable `nodeType`; the message then read "a undefined point". It now reads "a point
+  whose type cannot be established". `addLoad()` and `reassignLoad()` share the helper, so
+  they stay consistent.
+
+### Changed
+
+- The `reassignLoad()` JSDoc documented `lookupNode` as `lookupNode?`, contradicting its
+  own description. It is now declared required, matching `addLoad()`: omission is a
+  caller error that fails closed, not a supported mode.
+
+### Added
+
+- Browser section **Changing a destination to a TC point (aliased load)** (13 checks),
+  bringing the suite to 257 checks in 14 sections. It builds the aliased project with the
+  real serializer, proves the alias resolves to the canonical destination, loads it
+  through the normal workflow, asserts the edit is refused and that the route, the load's
+  id/alias/value/unit, openability of the saved project and a clean reload all survive.
+- `test/load_eligibility.test.js` test 20: a target whose type cannot be established is
+  refused with `INELIGIBLE_LOAD_TARGET` by **both** `addLoad()` and `reassignLoad()`, with
+  a readable message.
+- Findings **F11** records a separate, pre-existing limitation found while doing this: the
+  schedule and annotation layers still compare raw `nodeId`, so an aliased load is
+  reported as an orphan and not drawn, even though the registry resolves it. Left
+  unchanged as out of scope.
+
+### Validation
+
+- `npm test` → 478 tests, 478 pass, 0 fail (was 477).
+- `npm run test:browser` → 257/257 checks passed, 14 sections (was 244/244 in 13).
+- Mutation: reverting the guard to raw id equality makes the new alias checks fail.
+  Source restored byte-for-byte; suites re-run green.
+
+### Fixed
+
 - **Editing a route to make its destination a TC point could save a project the app
   cannot reopen.** If the destination carried a load, the edit saved happily and left the
   load on a point that is no longer load-eligible. The app's own parser then refused that

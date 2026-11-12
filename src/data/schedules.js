@@ -59,6 +59,17 @@ const usedLoadIds = new Set();
  *
  * @returns {string} e.g. `load-7`.
  */
+/** A readable name for a resolved target's type, for a refusal message.
+ *
+ * A resolver is allowed to return an object whose `nodeType` is absent - that is what
+ * "not proven eligible" looks like - so the message must not read "a undefined point".
+ */
+function describeNodeType(target) {
+  return typeof target?.nodeType === 'string' && target.nodeType.length > 0
+    ? `${target.nodeType} point`
+    : 'point whose type cannot be established';
+}
+
 export function nextLoadId() {
   loadCounter += 1;
   let id = `load-${loadCounter}`;
@@ -299,7 +310,7 @@ export function addLoad(loads, input = {}) {
     return {
       ok: false,
       code: 'INELIGIBLE_LOAD_TARGET',
-      message: `A load cannot be recorded on a ${target.nodeType} point. Choose a pole, an FPB or the Origin.`,
+      message: `A load cannot be recorded on a ${describeNodeType(target)}. Choose a pole, an FPB or the Origin.`,
     };
   }
 
@@ -358,8 +369,12 @@ export function updateLoad(loads, id, patch = {}) {
  * @param {Array<object>} loads Current records.
  * @param {string} id Load id.
  * @param {string} nodeId Destination node asset id.
- * @param {{lookupNode?: (nodeId: string) => ({nodeType?: string} | null)}} options
- *   Resolve an asset id to its node. Required: a target cannot be checked without it.
+ * @param {{lookupNode: (nodeId: string) => ({nodeType?: string} | null)}} options
+ *   Resolve an asset id to its node. **Required**: a load cannot be moved unless the
+ *   target's type can be established, so a call without it returns
+ *   `MISSING_NODE_RESOLVER` rather than moving anything. The property is declared as
+ *   non-optional because omission is a caller error, not a supported mode - the runtime
+ *   check exists to fail closed on a mistake, not to make the argument optional.
  * @returns {{ok: true, loads: Array<object>, record: object}
  *   | {ok: false, code: string, message: string}}
  */
@@ -400,7 +415,7 @@ export function reassignLoad(loads, id, nodeId, options = {}) {
     return {
       ok: false,
       code: 'INELIGIBLE_LOAD_TARGET',
-      message: `A load cannot be moved to a ${target.nodeType} point. Choose a pole, an FPB or the Origin.`,
+      message: `A load cannot be moved to a ${describeNodeType(target)}. Choose a pole, an FPB or the Origin.`,
     };
   }
 

@@ -18,6 +18,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F8](#f8-appjs-is-a-1590-line-controller) | Maintainability | Low | Open |
 | [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | Open |
 | [F10](#f10-a-load-cannot-reach-a-tc-point-by-creation-move-edit-import-or-file) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — five guarded boundaries covering creation, move, route edit, import and file; fail-closed, each with executable evidence |
+| [F11](#f11-an-aliased-load-id-is-not-resolved-by-the-schedule-and-annotation-layers) | Alias identity handled inconsistently | Low | Open — recorded, not changed; the TC guard was made alias-aware |
 
 ---
 
@@ -272,7 +273,12 @@ another's job:
 5. Route edit (`handleSubmit()` in `src/ui/app.js`) — **refuses to turn a destination
    into a TC point while it carries a load**, showing the load's value and pointing at
    the Loads tab. This is the most severe of the five, because it is the only one that
-   could produce a project the app cannot reopen (see below).
+   could produce a project the app cannot reopen (see below). It compares **canonical
+   node identity**, not identifier text: both the edited destination and every load's
+   target are resolved through the live registry (`canonicalNodeId`), so a load stored
+   under a coordinate alias is recognised as belonging to the destination. The first
+   version compared `load.nodeId === destinationAssetId(routeId)` and missed exactly those
+   loads — reproduced, and it reopened the data-loss path this rule exists to close.
 
 `insertLoadRecord()`, `insertReassignedLoad()` and `applyNodeLoadPlan()` are **unguarded
 by design** and are not counted as boundaries: the first two are the primitives beneath
@@ -362,3 +368,45 @@ defects in the application.
 | A browser check proves row editing | No such check exists **(now added — browser §5)** | F2 above |
 | A browser check proves a click is not a drag | No such check exists | [Feature matrix §5](09-feature-matrix.md#5-annotation-placement) |
 | The example's bounding box is `minX=−3, maxX=5` | It is `minX=0, maxX=12, minY=−17, maxY=0` | [Route and geometry §1](04-route-and-geometry.md#1-coordinate-system) |
+
+---
+
+## F11 — An aliased load id is not resolved by the schedule and annotation layers
+
+**Status: open. Recorded, not changed.** Found while fixing the TC-transition guard
+(F10); it is a separate limitation and fixing it would be an unrelated change.
+
+**Observed.** A load's `nodeId` is normally the canonical asset id (`dst:route-6`), but
+the registry also accepts a **coordinate spelling** as an alias: `canonicalNodeId('0,-2')`
+returns `dst:route-1`. The project parser accepts such a load, keeps the spelling verbatim,
+and correctly resolves it for the eligibility rule — so the file loads. But two other
+layers compare the raw string:
+
+- `src/ui/network_panel.js` (`known.has(load.nodeId)`) treats the load as an **orphan**;
+- because of that, the annotation layer draws **no callout** for it.
+
+Reproduced with a project built by the real serializer:
+
+```
+routes: [{ id: 'route-1', from: 'origin', direction: 'south', spans: 2, tc: false }]
+loads:  [{ id: 'load-1', nodeId: '0,-2', value: 25, unit: 'kVA' }]   // alias
+```
+
+The load parses `ok: true`, but the app shows *"1 load refers to points or spans this
+drawing no longer has"* and the 25 kVA callout is missing from the drawing.
+
+**Impact.** Low, because the application never *writes* an alias: every UI path stores the
+canonical id, so this is reachable only through a hand-edited or externally generated
+file. It is not zero, though — the parser accepts the file, which makes the resulting
+"orphan" report misleading rather than merely absent.
+
+**Not changed here.** Normalising aliases in the panel and annotation layers is a
+behavioural change to two subsystems, with its own risk of reclassifying records, and it
+is outside the TC-eligibility act. The TC guard itself *was* made alias-aware, because
+leaving it raw-string based left the data-loss defect open (see F10).
+
+**Suggested direction, if it is taken up.** Resolve once, at the boundary where loads
+enter application state, rather than comparing ids in each consumer. The parser already
+has the registry in hand (`validateMeasuredData`), so canonicalising `load.nodeId` there
+would make every downstream consumer correct at once, and the orphan warnings would then
+mean what they say.

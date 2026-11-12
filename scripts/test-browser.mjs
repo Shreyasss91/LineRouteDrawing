@@ -893,6 +893,181 @@ try {
   );
   check('no error is shown the second time', (await formErrorText()) === null);
 
+  /* ---------------- The same transition, with an aliased load ---------------- */
+
+  section('Changing a destination to a TC point (aliased load)');
+
+  // A load's `nodeId` need not be the canonical `dst:<routeId>`. A coordinate spelling
+  // (`0,-2`) is an accepted identifier for the same physical pole, the loader keeps the
+  // spelling it was given rather than rewriting it, and the registry resolves it to the
+  // canonical node. The first version of the guard compared identifier TEXT
+  // (`load.nodeId === destinationAssetId(routeId)`), so an aliased load was not seen as
+  // attached, the edit went through, and the project again became one the parser refuses
+  // to reopen. Reproduced before the fix; this is the regression test for it.
+  //
+  // The project below is built with the real serializer from a real network, not
+  // hand-written JSON, so the alias is one the application genuinely accepts.
+  const aliasFixture = await page.evaluate(async () => {
+    const { buildNetwork } = await import('./src/geometry/network.js');
+    const { buildAssetRegistry, destinationAssetId } = await import('./src/geometry/assets.js');
+    const { serializeProjectJson } = await import('./src/ui/project.js');
+
+    const routes = [
+      { id: 'route-1', from: 'origin', direction: 'south', spans: 2, tc: false, fpb: false },
+    ];
+    const registry = buildAssetRegistry(buildNetwork(routes));
+    const canonicalId = destinationAssetId('route-1');
+    const alias = registry.nodeAsset(canonicalId).coordKey;
+    const stored = serializeProjectJson(
+      {
+        routes,
+        originMarker: 'plain',
+        spanLength: 40,
+        layout: 'a4_landscape',
+        loads: [{ id: 'load-1', nodeId: alias, value: 25, unit: 'kVA' }],
+        spanLengths: {},
+        loadPlacements: {},
+        spanPlacements: {},
+        nodeDesignations: {},
+      },
+      { savedAt: new Date('2026-01-01T00:00:00Z') },
+    );
+    return {
+      canonicalId,
+      alias,
+      resolved: registry.canonicalNodeId(alias),
+      stored,
+    };
+  });
+
+  // 1. The alias resolves to the intended physical destination, and is not the
+  //    canonical spelling - otherwise this section would be a duplicate of the one above.
+  check(
+    'the alias resolves to the canonical destination',
+    aliasFixture.resolved === aliasFixture.canonicalId,
+    `${aliasFixture.alias} -> ${aliasFixture.resolved}`,
+  );
+  check(
+    'the alias is genuinely a different identifier',
+    aliasFixture.alias !== aliasFixture.canonicalId,
+    `${aliasFixture.alias} vs ${aliasFixture.canonicalId}`,
+  );
+
+  // 2. Load it through the normal application workflow and confirm the load is valid,
+  //    resolved and drawn before any edit is attempted.
+  await page.goto(base, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => localStorage.clear());
+  await page.evaluate((doc) => {
+    localStorage.setItem('line-route-drawing:v3:project', doc);
+  }, aliasFixture.stored);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg', { timeout: 15000 });
+  await page.waitForTimeout(300);
+
+  const loadBanner = await page.evaluate(() => {
+    const hit = document.body.innerText.match(/[^\n]*cannot be opened[^\n]*/i);
+    return hit ? hit[0].trim() : null;
+  });
+  check('the aliased project opens with no recovery banner', loadBanner === null, String(loadBanner));
+
+  const aliasRows = await readRouteRows(page);
+  check(
+    'the aliased project loads its one route',
+    aliasRows.length === 1 && aliasRows[0].id === 'route-1',
+    JSON.stringify(aliasRows.map((r) => r.id)),
+  );
+  const aliasBefore = await readSavedProject(page);
+  check(
+    'the load is valid and keeps its alias as its identifier',
+    aliasBefore?.loads?.length === 1 && aliasBefore.loads[0].nodeId === aliasFixture.alias,
+    JSON.stringify(aliasBefore?.loads),
+  );
+  // NOTE: the annotation and schedule layers still key on the raw `nodeId`
+  // (`known.has(load.nodeId)` in network_panel.js), so an aliased load is shown as
+  // unresolved and not drawn even though the registry resolves it. That is a separate,
+  // pre-existing limitation of alias support OUTSIDE the parser, and it is out of scope
+  // here - this act only makes the TC-transition guard identity-correct. The check below
+  // therefore pins what this act guarantees: the load survives loading with its alias
+  // intact and the project remains openable. See findings F11.
+  const aliasResolves = await page.evaluate(async (alias) => {
+    const { buildNetwork } = await import('./src/geometry/network.js');
+    const { buildAssetRegistry, destinationAssetId } = await import('./src/geometry/assets.js');
+    const routes = [
+      { id: 'route-1', from: 'origin', direction: 'south', spans: 2, tc: false, fpb: false },
+    ];
+    const registry = buildAssetRegistry(buildNetwork(routes));
+    return registry.canonicalNodeId(alias) === destinationAssetId('route-1');
+  }, aliasFixture.alias);
+  check(
+    'the loaded alias still resolves through the registry',
+    aliasResolves === true,
+    String(aliasResolves),
+  );
+
+  // 3-4. Attempt the pole -> TC transition through the real edit form; it must be refused.
+  await page.locator('#route-rows tr[data-id="route-1"] button[data-action="edit"]').click();
+  await page.waitForTimeout(250);
+  await page.check('#field-tc');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(400);
+  const aliasRefusal = await formErrorText();
+  check(
+    'the aliased load is recognised as attached, so the edit is refused',
+    Boolean(aliasRefusal),
+    String(aliasRefusal),
+  );
+  check(
+    'the refusal names the aliased load',
+    /25 kVA/.test(aliasRefusal ?? '') && /Loads tab/.test(aliasRefusal ?? ''),
+    String(aliasRefusal),
+  );
+
+  // 5-6. The route stays a pole and the load keeps its id, alias, value and unit.
+  const aliasAfter = await readSavedProject(page);
+  check(
+    'the route is still an ordinary pole',
+    aliasAfter?.routes?.[0]?.tc === false,
+    JSON.stringify(aliasAfter?.routes?.[0]),
+  );
+  check(
+    'the aliased load kept its id, alias, value and unit',
+    aliasAfter?.loads?.length === 1 &&
+      aliasAfter.loads[0].id === 'load-1' &&
+      aliasAfter.loads[0].nodeId === aliasFixture.alias &&
+      aliasAfter.loads[0].value === 25 &&
+      aliasAfter.loads[0].unit === 'kVA',
+    JSON.stringify(aliasAfter?.loads),
+  );
+
+  // 7. The saved project must still be one the app can open.
+  const aliasReopen = await page.evaluate(async () => {
+    const { parseProjectJson } = await import('./src/ui/project.js');
+    const raw = localStorage.getItem('line-route-drawing:v3:project');
+    const result = parseProjectJson(raw, {});
+    return result.ok ? { ok: true } : { ok: false, code: result.code };
+  });
+  check(
+    'the saved project is still openable after the refusal',
+    aliasReopen.ok === true,
+    JSON.stringify(aliasReopen),
+  );
+
+  // 8. Reloading must not produce a recovery banner.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg', { timeout: 15000 });
+  await page.waitForTimeout(300);
+  const aliasReloadBanner = await page.evaluate(() => {
+    const hit = document.body.innerText.match(/[^\n]*cannot be opened[^\n]*/i);
+    return hit ? hit[0].trim() : null;
+  });
+  check('reloading after the refusal shows no recovery banner', aliasReloadBanner === null, String(aliasReloadBanner));
+  const aliasReloadRows = await readRouteRows(page);
+  check(
+    'the aliased project comes back unchanged',
+    aliasReloadRows.length === 1 && aliasReloadRows[0].id === 'route-1',
+    JSON.stringify(aliasReloadRows.map((r) => r.id)),
+  );
+
   /* ---------------- Dragging a callout ---------------- */
 
   section('Manual annotation placement');

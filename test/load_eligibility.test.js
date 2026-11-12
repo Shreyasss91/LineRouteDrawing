@@ -487,3 +487,32 @@ test('19. the import planner refuses when it cannot check a target', () => {
   assert.equal(refused.ok, false);
   assert.equal(refused.plan, undefined);
 });
+
+test('20. a target whose type cannot be established is refused, consistently', () => {
+  const f = fixture();
+  const seeded = insertLoadRecord([], { nodeId: f.pole.id, value: 25, unit: 'kVA' }).loads;
+  const id = seeded[0].id;
+
+  // A resolver may return an object with no usable `nodeType`. That proves nothing about
+  // eligibility, so it must land on the same code as an actively ineligible point, and
+  // both operations must agree - a caller handling `addLoad()` and `reassignLoad()` with
+  // one branch depends on it.
+  for (const resolved of [{}, { nodeType: undefined }, { nodeType: null }, { nodeType: '' }]) {
+    const moved = reassignLoad(seeded, id, f.pole.id, { lookupNode: () => resolved });
+    assert.equal(moved.ok, false, `move refused for ${JSON.stringify(resolved)}`);
+    assert.equal(moved.code, 'INELIGIBLE_LOAD_TARGET');
+
+    const added = addLoad([], {
+      nodeId: f.pole.id,
+      value: 10,
+      unit: 'kVA',
+      lookupNode: () => resolved,
+    });
+    assert.equal(added.ok, false, `create refused for ${JSON.stringify(resolved)}`);
+    assert.equal(added.code, moved.code, 'both operations report the same code');
+
+    // The message must read as English rather than interpolating "undefined".
+    assert.match(moved.message, /point whose type cannot be established/);
+    assert.doesNotMatch(moved.message, /undefined/);
+  }
+});

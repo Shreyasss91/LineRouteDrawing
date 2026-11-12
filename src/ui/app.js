@@ -1117,8 +1117,23 @@ function handleSubmit(event) {
       // (Loads tab -> Reassign), and then to try again.
       const becomesTc = result.value.tc === true && state.routes[index].tc !== true;
       if (becomesTc) {
+        // Compare PHYSICAL identity, not identifier text. A load's `nodeId` may legally
+        // be a coordinate spelling (`0,-2`) or any other accepted alias for the same
+        // pole, and the loader keeps that spelling verbatim rather than rewriting it, so
+        // `nodeId === destinationAssetId(...)` missed exactly those loads and let an
+        // aliased load be stranded on a freshly made TC point. Both sides are resolved
+        // through the live registry - the one authority on identity - and compared as
+        // canonical node ids.
+        const registry = current?.registry;
         const destinationId = destinationAssetId(state.routes[index].id);
-        const attached = (state.loads ?? []).filter((load) => load.nodeId === destinationId);
+        const canonicalDestination = registry
+          ? registry.canonicalNodeId(destinationId)
+          : destinationId;
+        const attached = (state.loads ?? []).filter((load) => {
+          if (!registry) return load.nodeId === destinationId;
+          const canonicalLoad = registry.canonicalNodeId(load.nodeId);
+          return canonicalLoad !== null && canonicalLoad === canonicalDestination;
+        });
         if (attached.length > 0) {
           const which = attached
             .map((load) => `${load.value} ${load.unit}`)

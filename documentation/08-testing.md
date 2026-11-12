@@ -4,8 +4,8 @@
 
 1. [Requirements](#1-requirements)
 2. [Commands](#2-commands)
-3. [The Node suite: 477 tests in 30 files](#3-the-node-suite-477-tests-in-30-files)
-4. [The browser suite: 244 checks in 13 sections](#4-the-browser-suite-244-checks-in-13-sections)
+3. [The Node suite: 478 tests in 30 files](#3-the-node-suite-478-tests-in-30-files)
+4. [The browser suite: 257 checks in 14 sections](#4-the-browser-suite-257-checks-in-14-sections)
 5. [The headed print smoke test](#5-the-headed-print-smoke-test)
 6. [Test strategy: what is tested and why](#6-test-strategy-what-is-tested-and-why)
 7. [Writing a new test](#7-writing-a-new-test)
@@ -31,12 +31,12 @@
 
 | Command | What it does | Expected result |
 | --- | --- | --- |
-| `npm test` | `node --test "test/*.test.js"` | **477 tests, 477 pass, 0 fail** |
-| `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **244/244 checks pass** |
+| `npm test` | `node --test "test/*.test.js"` | **478 tests, 478 pass, 0 fail** |
+| `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **257/257 checks pass** |
 | `npm run test:print:headed` | `node scripts/print-dialog-smoke.mjs` — opens a real print dialog | manual, needs an interactive terminal |
 | `npm run serve` | static server for manual use | serve locally, then open the printed URL |
 
-Verified on this working tree: `npm test` → `tests 477, pass 477, fail 0`; the suite
+Verified on this working tree: `npm test` → `tests 478, pass 478, fail 0`; the suite
 takes about 1.2 s.
 
 `npm run test:browser` requires the Playwright browser binaries. `test-browser.mjs`
@@ -46,7 +46,7 @@ install command if it is absent, rather than a stack trace.
 The browser suite writes its downloads and diagnostics into a temp directory; nothing
 it produces is committed.
 
-## 3. The Node suite: 477 tests in 30 files
+## 3. The Node suite: 478 tests in 30 files
 
 The whole domain layer is DOM-free, so it is tested directly under Node. Files and
 their test counts:
@@ -62,7 +62,7 @@ their test counts:
 | `fpb_clip.test.js` | 13 | Clipping against the rectangle: miss, wholly inside, splitting, endpoint preservation, visible contact |
 | `geometry.test.js` | 22 | Directions, spans → edges/poles, sequencing, forward references, shared endpoints, overlap, junctions, branches, the example topology |
 | `integration.test.js` | 10 | Route list → network → scene → SVG end to end; the example drawing's counts |
-| `load_eligibility.test.js` | 19 | A load on a TC point refused at all four guarded boundaries — creation, move, import and file; `addLoad()` and `reassignLoad()` both fail closed without a resolver or with an unresolvable target, and a rejected move leaves the input untouched; the import planner refuses without both `lookupNode` and `isEligible`; aliased spellings caught at model, reassign, parser and import planner; eligible re-targets keep id, value and unit; orphans still kept; eligible creates still accepted |
+| `load_eligibility.test.js` | 20 | A load on a TC point refused at all four guarded boundaries — creation, move, import and file; `addLoad()` and `reassignLoad()` both fail closed without a resolver or with an unresolvable target, and a rejected move leaves the input untouched; the import planner refuses without both `lookupNode` and `isEligible`; aliased spellings caught at model, reassign, parser and import planner; eligible re-targets keep id, value and unit; orphans still kept; eligible creates still accepted |
 | `migration.test.js` | 20 | v1→v2, v2→v3, defaults, warnings, no invented measurements |
 | `mini_preview.test.js` | 11 | Fitted viewBox, designation overlay, empty state, scaling of label text |
 | `origin_label.test.js` | 13 | The `Origin` word's placement, per-marker-kind behaviour, profile gating |
@@ -90,7 +90,7 @@ Run one file:
 node --test test/geometry.test.js
 ```
 
-## 4. The browser suite: 244 checks in 13 sections
+## 4. The browser suite: 257 checks in 14 sections
 
 `npm run test:browser` starts a static server and drives Chromium against the real
 `index.html`. It asserts on the **rendered DOM and SVG**, not on internals.
@@ -103,13 +103,14 @@ node --test test/geometry.test.js
 | 4 | Selection and the reference drawing | Row → drawing highlight, drawing → row highlight, the reference panel mirrors the selection |
 | 5 | Editing an existing route | Opening the edit form switches it to save mode; a direction change saves with the route's **id preserved** in both the table and the saved file; the load on the edited route's **destination** keeps its derived id (`dst:<routeId>`) even though the point moves, stays resolved, and its callout is redrawn on the moved point; both unrelated route records are byte-identical in the saved project; designations are carried; the direction, load target, value and unit survive a reload |
 | 6 | Changing a destination to a TC point | Ticking TC on an edit whose destination carries a load is **refused** with a message naming the load; the route, the load, its id/value/unit and the edit-in-progress are all preserved; the saved project is still **openable by the parser** and reloads with no recovery banner; a destination with no load can still be made TC, and after removing the load the same transition succeeds |
-| 7 | Manual annotation placement | Drag a callout; the position survives a reload; a click is not a drag |
-| 8 | Spreadsheet and CSV workflow | TSV copy has the designation header; a valid import is staged before applying; cancel applies nothing; an invalid import is refused whole and changes nothing |
-| 9 | Export visibility | Both switches start on; each combination changes the exports; the preview is unaffected |
-| 10 | PDF output | The PDF is produced, is a real PDF, and contains the expected vector work |
-| 11 | Print output, every page layout | For all four layouts: the SVG is sized **explicitly in mm**, fits the printable box, keeps the scene aspect, and the `@page` size is the chosen paper — i.e. **one sheet** |
-| 12 | TC marker geometry | The printed leaving span equals the configured spacing; no line inside the triangle; the triangle's outline matches across profiles |
-| 13 | Console | No console errors or unhandled rejections during the whole run |
+| 7 | Changing a destination to a TC point (aliased load) | A load stored under a **coordinate alias** (`0,-2`) instead of the canonical id is recognised as belonging to the destination: the alias is proven to resolve to it through the registry, the edit is refused, the route stays a pole, the load keeps its id/alias/value/unit, the saved project is still openable and a reload shows no recovery banner |
+| 8 | Manual annotation placement | Drag a callout; the position survives a reload; a click is not a drag |
+| 9 | Spreadsheet and CSV workflow | TSV copy has the designation header; a valid import is staged before applying; cancel applies nothing; an invalid import is refused whole and changes nothing |
+| 10 | Export visibility | Both switches start on; each combination changes the exports; the preview is unaffected |
+| 11 | PDF output | The PDF is produced, is a real PDF, and contains the expected vector work |
+| 12 | Print output, every page layout | For all four layouts: the SVG is sized **explicitly in mm**, fits the printable box, keeps the scene aspect, and the `@page` size is the chosen paper — i.e. **one sheet** |
+| 13 | TC marker geometry | The printed leaving span equals the configured spacing; no line inside the triangle; the triangle's outline matches across profiles |
+| 14 | Console | No console errors or unhandled rejections during the whole run |
 
 The route-edit section is the automated guard for the edit path that was previously
 untested in the DOM ([findings F2](findings.md#f2-an-edited-route-is-now-covered-by-a-browser-test)).
@@ -179,7 +180,7 @@ The suite is organised around **contracts**, not around files:
    `geometry.test.js` pin the example drawing at 34 nodes / 33 edges / the endpoint
    set, so a change in the walk shows up immediately.
 6. **DOM-free by construction.** Nothing in `test/` loads a browser; nothing in
-   `src/geometry/` or `src/data/` needs one. This is why 477 tests run in ~1.2 s.
+   `src/geometry/` or `src/data/` needs one. This is why 478 tests run in ~1.2 s.
 
 ## 7. Writing a new test
 
