@@ -9,7 +9,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | ID | Area | Severity | Status |
 | --- | --- | --- | --- |
 | [F1](#f1-the-form-and-the-project-parser-disagree-on-documented-limits) | Form vs. parser limits | Low | Open — documented, not changed |
-| [F2](#f2-an-edited-route-is-now-covered-by-a-browser-test) | Untested UI path | Medium | **Closed** — 22 browser checks exercise the edit form |
+| [F2](#f2-an-edited-route-is-now-covered-by-a-browser-test) | Untested UI path | Medium | **Closed** — 32 browser checks exercise the edit form |
 | [F3](#f3-drag-at-zoom-is-implemented-but-unverified) | Untested UI behaviour | Low | Open |
 | [F4](#f4-the-static-spacing-minimum-in-the-markup-is-stale) | Stale literal | Low | Open |
 | [F5](#f5-unknown-keys-in-a-project-file-are-ignored-silently) | Forward compatibility | Low | Open |
@@ -65,20 +65,36 @@ that had **no automated coverage**:
 **Impact.** A regression in the edit path — for example losing the row's `id`, which
 would orphan its loads — would not have been caught.
 
-**Fix.** A new browser section, *Editing an existing route*, in
-`scripts/test-browser.mjs` (+22 checks, 198 → 221). It builds a three-route project
-whose second route starts at point `A`, records a 25 kVA load on `A`, opens the edit form
-through the row's own Edit button, changes the direction East → West, and saves through
-the real form. It then asserts, against both the rendered table and the persisted
-project:
+**Fix.** A browser section, *Editing an existing route*, in `scripts/test-browser.mjs`.
+It was introduced with 23 checks (198 → 221) and then **strengthened to 32 checks**
+(221 → 230), which is the state described here.
+
+The scenario attaches the load to the **destination of the route being edited**, not to
+its source. That is the strongest place to put it, because the destination's asset id is
+derived from the edited route's id (`dst:<routeId>`), so one relationship covers route
+identity, endpoint identity and load attachment. Editing the route also *moves* that
+destination in the drawing, which is what makes the test prove the load follows the
+point **by identity rather than by position**.
+
+It builds a three-route project, records a 25 kVA load on the edited route's destination
+through the real dropdown, opens the edit form through the row's own Edit button, changes
+the direction East → West, and saves through the real form. It then asserts, against the
+rendered table, the saved project and the rendered callout:
 
 - the route count is unchanged and the form returns to add mode;
 - the edited route keeps its id in the UI **and** in the saved file;
-- the load keeps the same endpoint id, stays out of the unresolved bar, and is still
-drawn as a `25 kVA` callout;
-- both neighbouring routes are byte-identical in the table;
-- all 11 designations belonging to the fixture's routes are unchanged;
-- the state survives a reload with the same id and the load still drawn.
+- the destination keeps the id `dst:<routeId>` even though its coordinate changes;
+- the load keeps that exact destination id, plus its value and unit;
+- it stays out of the unresolved bar and is redrawn as a `25 kVA` callout;
+- the callout group keeps the id `callout:dst:<routeId>` **and its bounding box moves**,
+  so it follows the point rather than being left behind or re-created elsewhere;
+- both unrelated route records are byte-identical **in the saved project object**, not
+  merely in the table;
+- every designation entry for the fixture's own routes is unchanged — with the key set
+  derived from the captured route ids rather than hardcoded, so the section does not
+  depend on where it sits in the suite or on the route counter;
+- after a reload: the same route id, the same direction, the same load node id, value and
+  unit, and the callout still drawn.
 
 East → West was chosen deliberately: it keeps every node id, label and designation
 identical (verified against the real engine), so a failure indicates the edit path broke
@@ -89,11 +105,18 @@ existing route object, so `id` is preserved, and endpoint asset ids are derived 
 route id, so a load on `endpoint:A` stays resolved. The finding was a coverage gap, not a
 bug.
 
-**Test strength verified.** With `state.routes[index] = { id: createRoute(...).id, ... }`
-substituted for the real replacement, 4 checks fail (stable id in the UI, id in the saved
-file, designations, reload). With a line added that drops loads on the edited route's
-endpoints, 2 checks fail (load still recorded, callout still drawn). The source was then
-restored byte-for-byte (`git diff` empty) and the suites re-verified green.
+**Test strength verified** by three mutations of `src/ui/app.js`, each reverted
+byte-for-byte (`git diff` empty) and the suites re-run green afterwards:
+
+| Mutation | Checks that fail |
+| --- | --- |
+| Regenerate the route id on edit (`{ id: createRoute(...).id, ... }`) | **10** — id in the UI, id in the saved file, unresolved banner, callout present, callout keyed to the destination, callout text, callout position, designations, reload id, reloaded load target |
+| Drop the load on the edited route's destination | **9** — load still recorded, value/unit, callout present, callout keyed to the destination, callout text, callout position, plus the three reload assertions |
+| Corrupt the designation table on recompute (rename every point) | **1** — the designation-preservation check |
+
+The first mutation is the important one: regenerating the route id is exactly the
+regression this finding was written about, and it now fails ten ways because the load is
+attached to the route's own destination rather than to a point shared with a neighbour.
 
 ## F3 — Drag at zoom is implemented but unverified
 

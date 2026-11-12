@@ -17,6 +17,41 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Changed
 
+- **Browser §5 (route editing) strengthened from 23 to 32 checks.** The load now attaches
+  to the **destination of the route being edited**, whose asset id is derived from the
+  route id (`dst:<routeId>`) — instead of to a point shared with a neighbouring route.
+  That single relationship covers route identity, endpoint identity and load attachment,
+  and because editing the route *moves* that destination it is the first assertion in the
+  suite that a load follows a point **by identity rather than by position**: the callout's
+  bounding box is captured before the edit and compared after.
+- Test-order coupling removed. The section no longer hardcodes `route-10/11/12` or matches
+  a designation prefix; route ids, destination id and designation keys are all derived
+  from the rows actually rendered, so moving the section or changing the route counter
+  cannot break it.
+- Unrelated routes are now asserted **from the saved project objects**, not only from the
+  rendered table, so a change that survives rendering but corrupts the file is caught.
+- The post-reload assertions now cover the exact load node id, value and unit and the
+  redrawn callout, rather than just the route list.
+- Count reporting corrected in `CHANGELOG.md` for `2926c2f`: that commit added **23**
+  `check()` calls (198 → 221), not 22 as first written.
+
+### Validation
+
+- `npm run test:browser` → 230/230 checks passed, 12 sections (was 221/221).
+- `npm test` → 472 tests, 472 pass, 0 fail (unaffected; `src/` was not touched).
+- Mutation evidence, each reverted byte-for-byte with `git diff` empty and the suites
+  re-run green: regenerating the route id on edit fails **10** checks, dropping the load
+  on the edited destination fails **9**, corrupting the designation table fails **1**.
+  The first mutation is precisely the regression F2 was written about.
+
+### Note
+
+- **No implementation defect was found.** `src/` is unchanged by this work; the edit path
+  already preserves the route id and endpoint ids are already derived from it. This commit
+  is coverage only.
+
+### Changed
+
 - **`addLoad()` now fails closed.** The `lookupNode` resolver was optional, so a caller
   that omitted it skipped the eligibility check entirely and could still create a load on
   a TC point — the model boundary was bypassable by omission. The resolver is now
@@ -63,7 +98,7 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 - `test/load_eligibility.test.js` — 10 tests pinning the two boundaries that refuse a
   load on a TC point, plus the eligible cases that must keep working.
 - `INELIGIBLE_LOAD_TARGET` refusal code in the project parser.
-- Browser section **Editing an existing route** — 22 checks covering the edit form end
+- Browser section **Editing an existing route** — 23 checks covering the edit form end
   to end (browser suite 198 → 221 checks in 11 → 12 sections).
 - `CHANGELOG.md` (this file).
 - `CLAUDE.md` rule that every change needs a changelog entry, and a pre-commit
@@ -97,7 +132,7 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
   route keeps its `id` in the UI and in the file, the load keeps its endpoint id, stays out
   of the unresolved bar and is still drawn as a `25 kVA` callout, both neighbouring routes
   are untouched, all 11 designations belonging to the fixture are preserved, and the state
-  survives a reload. +22 checks (198 → 221).
+  survives a reload. +23 checks (198 → 221).
 - East → West is the direction change used because it preserves every node id, label and
   designation (verified against the real geometry engine). Flipping East → North in that
   fixture merges the destination into a neighbouring route and legitimately relabels the

@@ -5,7 +5,7 @@
 1. [Requirements](#1-requirements)
 2. [Commands](#2-commands)
 3. [The Node suite: 472 tests in 30 files](#3-the-node-suite-472-tests-in-30-files)
-4. [The browser suite: 221 checks in 12 sections](#4-the-browser-suite-221-checks-in-12-sections)
+4. [The browser suite: 230 checks in 12 sections](#4-the-browser-suite-230-checks-in-12-sections)
 5. [The headed print smoke test](#5-the-headed-print-smoke-test)
 6. [Test strategy: what is tested and why](#6-test-strategy-what-is-tested-and-why)
 7. [Writing a new test](#7-writing-a-new-test)
@@ -32,7 +32,7 @@
 | Command | What it does | Expected result |
 | --- | --- | --- |
 | `npm test` | `node --test "test/*.test.js"` | **472 tests, 472 pass, 0 fail** |
-| `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **221/221 checks pass** |
+| `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **230/230 checks pass** |
 | `npm run test:print:headed` | `node scripts/print-dialog-smoke.mjs` — opens a real print dialog | manual, needs an interactive terminal |
 | `npm run serve` | static server for manual use | serve locally, then open the printed URL |
 
@@ -90,7 +90,7 @@ Run one file:
 node --test test/geometry.test.js
 ```
 
-## 4. The browser suite: 221 checks in 12 sections
+## 4. The browser suite: 230 checks in 12 sections
 
 `npm run test:browser` starts a static server and drives Chromium against the real
 `index.html`. It asserts on the **rendered DOM and SVG**, not on internals.
@@ -101,7 +101,7 @@ node --test test/geometry.test.js
 | 2 | Span designations, TC and FPB naming | One row per physical span; span names; TC keeps a `TC`-style name; FPB is drawn as a box; no X on a marker |
 | 3 | Loads, lengths and the incompleteness notice | Three loads on one point; the notice appears while spans are unmeasured; the default length fills only unmeasured spans and never overwrites |
 | 4 | Selection and the reference drawing | Row → drawing highlight, drawing → row highlight, the reference panel mirrors the selection |
-| 5 | Editing an existing route | Opening the edit form switches it to save mode; a direction change saves with the route's **id preserved** in both the table and the saved file; a load on the shared endpoint stays resolved and still drawn; neighbouring routes are untouched; designations are carried; the state survives a reload |
+| 5 | Editing an existing route | Opening the edit form switches it to save mode; a direction change saves with the route's **id preserved** in both the table and the saved file; the load on the edited route's **destination** keeps its derived id (`dst:<routeId>`) even though the point moves, stays resolved, and its callout is redrawn on the moved point; both unrelated route records are byte-identical in the saved project; designations are carried; the direction, load target, value and unit survive a reload |
 | 6 | Manual annotation placement | Drag a callout; the position survives a reload; a click is not a drag |
 | 7 | Spreadsheet and CSV workflow | TSV copy has the designation header; a valid import is staged before applying; cancel applies nothing; an invalid import is refused whole and changes nothing |
 | 8 | Export visibility | Both switches start on; each combination changes the exports; the preview is unaffected |
@@ -112,6 +112,10 @@ node --test test/geometry.test.js
 
 The route-edit section is the automated guard for the edit path that was previously
 untested in the DOM ([findings F2](findings.md#f2-an-edited-route-is-now-covered-by-a-browser-test)).
+It is the densest section at 32 checks, because it is the only place the suite asserts
+that a point's **identity** survives an edit: the load is attached to the edited route's
+destination, whose asset id is derived from the route id, and the callout's bounding box
+is compared before and after so the load is proven to follow the moved point.
 
 The print section is the automated guard for the `c39eca9` regression
 ([Rendering §6.1](07-rendering-and-export.md#61-c39eca9-the-print-fit-ignored-the-sheet-height)).

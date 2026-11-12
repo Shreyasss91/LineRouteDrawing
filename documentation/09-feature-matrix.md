@@ -33,7 +33,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Complete overlap (same path either way) | Verified | `geometry.test.js`, `designations.test.js` | One physical span, one length |
 | Perpendicular crossings become junctions | Verified | `geometry.test.js` test 9 ("intersecting routes become connected junctions") | No junction **symbol** is drawn (all profiles set `showJunctionMarkers:false`) |
 | Zero-length span rejected | Verified | `network.js` `ERROR_CODES.ZERO_LENGTH`; `geometry.test.js` | Not reachable from the UI (unit steps only) |
-| Editing a row in place | Verified | Browser §5 (22 checks): the edit form opens, a direction change saves with the route `id` preserved in the table **and** the saved file, a load on the shared endpoint stays resolved and drawn, neighbours are untouched, designations carried, state survives a reload | `startEdit()`/`handleSubmit()` have no *unit* test; coverage is browser-level. The direction change in the test is East → West, chosen because it preserves every node id |
+| Editing a row in place | Verified | Browser §5 (32 checks): the edit form opens; a direction change saves with the route `id` preserved in the table **and** the saved file; a load on the edited route's **destination** keeps its derived id (`dst:<routeId>`) even though that point moves, stays resolved, and its callout is redrawn on the moved point; both unrelated route records are byte-identical in the saved project; designations are carried; the same direction, load target, value and unit survive a reload | `startEdit()`/`handleSubmit()` have no *unit* test; coverage is browser-level. The direction change is East → West, chosen because it preserves every node id |
 | Deleting a route leaves later identities stable | Verified | `route_identity.test.js` test 7, test 8 ("deleting a route leaves every other identity stable") | Deleting the **route** is the tested unit; deleting a row via the UI button is the same `state.routes.splice` path |
 | Deleting a branch leaves its records unresolved, not reassigned | Verified | `reconcile.test.js` tests 1, 4, 6, 7 | — |
 | Invalid rows are never dropped | Verified | `geometry.test.js` (forward reference and broken chain), `reconcile.test.js` test 7 | — |
@@ -186,7 +186,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | Runs fully offline from the local filesystem | Verified | No network requests in the source; jsPDF vendored | `file://` disables the clipboard fallback path |
 | Works from `npm run serve` | Verified | `scripts/serve.js`, used by `test-browser.mjs` | — |
-| Chromium (via Playwright) | Verified | 221 browser checks | — |
+| Chromium (via Playwright) | Verified | 230 browser checks | — |
 | Chrome, manually | Verified (manual) | Print-dialog validation | — |
 | Firefox | **Incomplete validation** | Nothing browser-specific in the source | Never run |
 | Safari / iOS | **Incomplete validation** | Nothing browser-specific | Never run |

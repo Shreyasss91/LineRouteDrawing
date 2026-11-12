@@ -504,10 +504,15 @@ try {
   // path that preserves a route's id - and therefore everything keyed to its
   // endpoints - was untested in a real DOM.
   //
-  // Start from a clean project with three routes so a fourth can be added, edited and
-  // compared against its neighbours. Route 2 starts at A and runs East; flipping it to
-  // West is the direction change used below because it keeps every node id, label and
-  // designation identical (checked against the real engine), so a failure here means
+  // The load is deliberately attached to the DESTINATION of the route being edited.
+  // That is the strongest place to put it: the destination's asset id is derived from
+  // the edited route's id (`dst:<routeId>`), so it tests route identity, endpoint
+  // identity and load attachment in one relationship. Editing the route also MOVES
+  // that destination in the drawing, so the test proves the load follows the point by
+  // identity rather than by position.
+  //
+  // Route 2 starts at A and runs East; flipping it to West keeps every node id, label
+  // and designation identical (verified against the real engine), so a failure means
   // the edit path broke identity rather than the drawing legitimately changing shape.
   await fresh(page, base);
   // An empty project boots with the bundled example loaded, so start from nothing.
@@ -520,38 +525,62 @@ try {
   const rowsBefore = await readRouteRows(page);
   check('the edit fixture has three routes', rowsBefore.length === 3, `${rowsBefore.length} rows`);
 
-  // A load on point A, which is the endpoint shared by routes 2 and 3 and the source
-  // of the route being edited. If the edit re-created the endpoint under a new id the
-  // load would go unresolved, which is exactly the regression this guards.
-  const nodeAOption = await page.evaluate(() => {
-    const options = [...document.querySelectorAll('#field-load-node option')].map((o) => ({
-      value: o.value,
-      text: o.textContent.trim(),
-    }));
-    // Options read `<designation> (<asset id>)`. Point A is the first route's
-    // destination, and its designation is exactly `A`, so match that prefix rather
-    // than guessing the id - ids in this session continue the counter from earlier
-    // sections and are not `route-1`.
-    const a = options.find((o) => /^A \(/.test(o.text));
-    return a ? a.value : null;
-  });
-  check('point A is offered as a load target', Boolean(nodeAOption), String(nodeAOption));
-  await addLoad(page, { nodeId: nodeAOption, value: 25, unit: 'kVA' });
-
-  const savedBefore = await readSavedProject(page);
+  // Route ids in this session continue a counter from earlier sections, so nothing here
+  // may assume they are route-1/2/3. Derive everything from the rows actually present.
   const editedId = rowsBefore[1].id;
   const neighbourId = rowsBefore[2].id;
+  const firstId = rowsBefore[0].id;
+  const editedDestinationId = `dst:${editedId}`;
   check(
     'the edited route has a stable id before the edit',
     typeof editedId === 'string' && editedId.length > 0,
     editedId,
   );
+
+  // Pick the destination of the edited route from the real dropdown, by its asset id.
+  await page.click('#tab-loads');
+  const destinationOption = await page.evaluate((wanted) => {
+    const options = [...document.querySelectorAll('#field-load-node option')].map((o) => ({
+      value: o.value,
+      text: o.textContent.trim(),
+    }));
+    const found = options.find((o) => o.value === wanted);
+    return found ? { value: found.value, text: found.text } : null;
+  }, editedDestinationId);
   check(
-    'the load is recorded against point A',
-    savedBefore?.loads?.length === 1 && savedBefore.loads[0].nodeId === nodeAOption,
+    'the edited route destination is offered as a load target',
+    Boolean(destinationOption),
+    `${editedDestinationId} -> ${JSON.stringify(destinationOption)}`,
+  );
+  await addLoad(page, { nodeId: destinationOption.value, value: 25, unit: 'kVA' });
+
+  // The callout must be on that exact point before the edit, so a later assertion about
+  // its position is comparing like with like.
+  const calloutBefore = await page.evaluate((wanted) => {
+    const group = document.querySelector(`#preview-canvas g#callout\\:${CSS.escape(wanted)}`)
+      ?? [...document.querySelectorAll('#preview-canvas g[id^="callout:"]')].find(
+        (g) => g.id === `callout:${wanted}`,
+      );
+    if (!group) return null;
+    const box = group.getBoundingClientRect();
+    return { text: group.textContent.trim(), x: box.x, y: box.y };
+  }, destinationOption.value);
+  check(
+    'the pre-edit callout is drawn on the edited route destination',
+    Boolean(calloutBefore) && /25 kVA/.test(calloutBefore?.text ?? ''),
+    JSON.stringify(calloutBefore),
+  );
+
+  const savedBefore = await readSavedProject(page);
+  const loadBefore = savedBefore?.loads?.[0];
+  check(
+    'the load is recorded against the edited route destination id',
+    savedBefore?.loads?.length === 1 && loadBefore?.nodeId === editedDestinationId,
     JSON.stringify(savedBefore?.loads),
   );
   const designationsBefore = await readDesignationMap(page);
+  const neighbourBefore = savedBefore?.routes?.[2];
+  const firstBefore = savedBefore?.routes?.[0];
 
   // Open the edit form for the second route through the row's own Edit button.
   await page.locator('#route-rows tr').nth(1).locator('button[data-action="edit"]').click();
@@ -586,14 +615,13 @@ try {
   );
   check(
     'the unrelated first route is untouched',
-    rowsAfter[0].id === rowsBefore[0].id &&
+    rowsAfter[0].id === firstId &&
       rowsAfter[0].cells.join('|') === rowsBefore[0].cells.join('|'),
   );
   check('the form returned to add mode', /Add route/.test(await page.locator('#btn-save-route').textContent()));
   check('the cancel-edit button is hidden again', !(await page.locator('#btn-cancel-edit').isVisible()));
 
-  // The persisted project is the authoritative after-state: the route id is kept, the
-  // direction is the new one, and the load still points at the same live endpoint.
+  // The persisted project is the authoritative after-state.
   const savedAfter = await readSavedProject(page);
   check('the project still has three routes', savedAfter?.routes?.length === 3, `${savedAfter?.routes?.length}`);
   check(
@@ -601,10 +629,29 @@ try {
     savedAfter?.routes?.[1]?.id === editedId && savedAfter.routes[1].direction === 'west',
     JSON.stringify(savedAfter?.routes?.[1]),
   );
+
+  // The unrelated route records must be identical in the FILE, not merely in the table.
+  check(
+    'the neighbouring route record is byte-identical in the saved project',
+    JSON.stringify(savedAfter?.routes?.[2]) === JSON.stringify(neighbourBefore),
+    `${JSON.stringify(neighbourBefore)} -> ${JSON.stringify(savedAfter?.routes?.[2])}`,
+  );
+  check(
+    'the unrelated first route record is byte-identical in the saved project',
+    JSON.stringify(savedAfter?.routes?.[0]) === JSON.stringify(firstBefore),
+    `${JSON.stringify(firstBefore)} -> ${JSON.stringify(savedAfter?.routes?.[0])}`,
+  );
+
+  // The load must still name the SAME destination id, even though that point moved.
   const loadAfter = savedAfter?.loads?.[0];
   check(
-    'the load is still recorded on the same endpoint id',
-    savedAfter?.loads?.length === 1 && loadAfter.nodeId === nodeAOption,
+    'the load is still recorded on the same destination id',
+    savedAfter?.loads?.length === 1 && loadAfter.nodeId === editedDestinationId,
+    JSON.stringify(loadAfter),
+  );
+  check(
+    'the load value and unit are unchanged by the edit',
+    loadAfter?.value === 25 && loadAfter?.unit === 'kVA',
     JSON.stringify(loadAfter),
   );
 
@@ -615,25 +662,50 @@ try {
   check('the load did not become unresolved', unresolvedAfter === 0, `${unresolvedAfter} banners`);
   const calloutAfter = await page.locator('#preview-canvas g[id^="callout:"]').count();
   check('the load is still drawn as a callout', calloutAfter === 1, `${calloutAfter} callouts`);
-  const calloutTextAfter = await page
-    .locator('#preview-canvas g[id^="callout:"]')
-    .first()
-    .textContent();
-  check('the callout still reads 25 kVA', /25 kVA/.test(calloutTextAfter ?? ''), String(calloutTextAfter).trim());
 
-  // Designations are carried, not re-derived: every point belonging to this
-  // fixture's routes holds the same name after the edit. Scoped to the fixture's own
-  // routes because the stored table still carries entries from earlier sections.
-  const designationsAfter = await readDesignationMap(page);
-  const fixtureIdsBefore = Object.keys(designationsBefore ?? {}).filter((k) =>
-    /^(origin|dst:route-1[012]|endpoint:|mid:route-1[012]:)/.test(k),
+  // Same group id as before - the callout is identified by the destination asset id, and
+  // that id did not change. Its text is unchanged, and it moved with the point.
+  const calloutAfterBox = await page.evaluate((wanted) => {
+    const group = [...document.querySelectorAll('#preview-canvas g[id^="callout:"]')].find(
+      (g) => g.id === `callout:${wanted}`,
+    );
+    if (!group) return null;
+    const box = group.getBoundingClientRect();
+    return { text: group.textContent.trim(), x: box.x, y: box.y };
+  }, editedDestinationId);
+  check(
+    'the callout is still keyed to the edited destination id',
+    Boolean(calloutAfterBox),
+    `callout:${editedDestinationId}`,
   );
-  check('the fixture has designations to compare', fixtureIdsBefore.length >= 5, `${fixtureIdsBefore.length}`);
+  check(
+    'the callout still reads 25 kVA',
+    /25 kVA/.test(calloutAfterBox?.text ?? ''),
+    JSON.stringify(calloutAfterBox),
+  );
+  check(
+    'the callout moved with the point it belongs to',
+    Boolean(calloutAfterBox && calloutBefore) &&
+      (Math.abs(calloutAfterBox.x - calloutBefore.x) > 1 ||
+        Math.abs(calloutAfterBox.y - calloutBefore.y) > 1),
+    `${JSON.stringify(calloutBefore)} -> ${JSON.stringify(calloutAfterBox)}`,
+  );
+
+  // Designations are carried, not re-derived. Keys are derived from the ids actually
+  // present, so this section does not depend on where it sits in the suite.
+  const designationsAfter = await readDesignationMap(page);
+  const fixturePrefixes = [firstId, editedId, neighbourId].map((id) => id);
+  const fixtureIdsBefore = Object.keys(designationsBefore ?? {}).filter((k) =>
+    fixturePrefixes.some((id) => k === `dst:${id}` || k.startsWith(`mid:${id}:`)),
+  );
+  check(
+    'the fixture has designations to compare',
+    fixtureIdsBefore.length >= 4,
+    `${fixtureIdsBefore.length}: ${fixtureIdsBefore.join(', ')}`,
+  );
   check(
     'every point of the edited and neighbouring routes kept its designation',
-    fixtureIdsBefore.every((k) =>
-      k.startsWith('endpoint:') || designationsAfter?.[k] === designationsBefore[k],
-    ),
+    fixtureIdsBefore.every((k) => designationsAfter?.[k] === designationsBefore[k]),
     JSON.stringify(
       fixtureIdsBefore.map((k) => [k, designationsBefore[k], designationsAfter?.[k]]),
     ),
@@ -647,6 +719,30 @@ try {
     'the edit survives a reload with its id intact',
     rowsAfterReload.length === 3 && rowsAfterReload[1].id === editedId,
     JSON.stringify(rowsAfterReload.map((r) => r.id)),
+  );
+  const savedAfterReload = await readSavedProject(page);
+  check(
+    'the reloaded project keeps the edited direction and the exact load target',
+    savedAfterReload?.routes?.[1]?.id === editedId &&
+      savedAfterReload.routes[1].direction === 'west' &&
+      savedAfterReload?.loads?.[0]?.nodeId === editedDestinationId,
+    JSON.stringify({ route: savedAfterReload?.routes?.[1], load: savedAfterReload?.loads?.[0] }),
+  );
+  check(
+    'the reloaded load keeps its value and unit',
+    savedAfterReload?.loads?.[0]?.value === 25 && savedAfterReload?.loads?.[0]?.unit === 'kVA',
+    JSON.stringify(savedAfterReload?.loads?.[0]),
+  );
+  const calloutAfterReload = await page.evaluate((wanted) => {
+    const group = [...document.querySelectorAll('#preview-canvas g[id^="callout:"]')].find(
+      (g) => g.id === `callout:${wanted}`,
+    );
+    return group ? group.textContent.trim() : null;
+  }, editedDestinationId);
+  check(
+    'the reloaded drawing still shows the load on the destination',
+    /25 kVA/.test(calloutAfterReload ?? ''),
+    String(calloutAfterReload),
   );
   check(
     'the reloaded drawing still shows the load',
