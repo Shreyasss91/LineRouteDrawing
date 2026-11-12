@@ -689,17 +689,323 @@ try {
 
   /* ---------------- Print ---------------- */
 
-  section('Print output');
+  // The print document is built by `printDrawing()`, which writes a fresh page into
+  // a hidden iframe and calls `print()` on it. That path had never been checked
+  // against the paper it claims: the `@page` rule was hardcoded to A4, so choosing
+  // A3 or Letter sent an A4 sheet to the printer and scaled the drawing for paper it
+  // was not on. The layout list is read from the selector the application renders
+  // from its own page configuration, so a layout added to the product is covered
+  // here without editing this file.
+  //
+  // `window.print()` is stubbed before the button is pressed. A real dialog blocks a
+  // headless run, and the document has already been written by the time it is called,
+  // so the stub captures exactly what a print would send while the rest of the flow
+  // runs unchanged.
 
-  await page.locator('#btn-print').click();
-  await page.waitForTimeout(900);
-  const printFrame = page.frames().find((f) => f !== page.mainFrame());
-  const printHtml = printFrame ? await printFrame.content().catch(() => '') : '';
-  check('a print sheet is produced', printHtml.length > 0);
-  check('the printed sheet carries no banner text', !/Span measurements incomplete/.test(printHtml));
-  check('the printed sheet carries no notice group', !/id="notice"/.test(printHtml));
-  check('the printed sheet keeps the load callout when enabled', /id="callout:/.test(printHtml));
-  check('the printed sheet keeps the markers', /<polygon /.test(printHtml));
+  section('Print output, every page layout');
+
+  const PRINT_LAYOUTS = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('#field-layout option')).map((option) => ({
+      id: option.value,
+      label: option.textContent.trim(),
+    })),
+  );
+  check(
+    'the page layout selector offers the configured layouts',
+    PRINT_LAYOUTS.length >= 4,
+    `${PRINT_LAYOUTS.length}: ${PRINT_LAYOUTS.map((l) => l.id).join(', ')}`,
+  );
+  for (const required of ['a4_landscape', 'a4_portrait', 'a3_landscape', 'letter_landscape']) {
+    check(
+      `the selector offers ${required}`,
+      PRINT_LAYOUTS.some((l) => l.id === required),
+    );
+  }
+
+  /** Read every straight segment out of a print document's SVG. */
+  function printedSegments(html) {
+    const segments = [];
+    for (const match of html.matchAll(/<line\b([^>]*)>/g)) {
+      const attr = (name) => {
+        const found = match[1].match(new RegExp(`${name}="(-?[\\d.]+)"`));
+        return found ? Number(found[1]) : null;
+      };
+      const x1 = attr('x1');
+      const y1 = attr('y1');
+      const x2 = attr('x2');
+      const y2 = attr('y2');
+      if ([x1, y1, x2, y2].every((v) => v !== null)) segments.push({ x1, y1, x2, y2 });
+    }
+    return segments;
+  }
+
+  /** Strict point-in-triangle, boundary excluded. */
+  function strictlyInside(p, tri) {
+    const sign = (a, b, c) => (a.x - c.x) * (b.y - c.y) - (b.x - c.x) * (a.y - c.y);
+    const e = 1e-3;
+    const d1 = sign(p, tri[0], tri[1]);
+    const d2 = sign(p, tri[1], tri[2]);
+    const d3 = sign(p, tri[2], tri[0]);
+    return (d1 > e && d2 > e && d3 > e) || (d1 < -e && d2 < -e && d3 < -e);
+  }
+
+  /** Parameter along a segment where it meets another, or null. */
+  function crossingT(segment, a, b) {
+    const rX = segment.x2 - segment.x1;
+    const rY = segment.y2 - segment.y1;
+    const sX = b.x - a.x;
+    const sY = b.y - a.y;
+    const den = rX * sY - rY * sX;
+    if (Math.abs(den) < 1e-12) return null;
+    const t = ((a.x - segment.x1) * sY - (a.y - segment.y1) * sX) / den;
+    const u = ((a.x - segment.x1) * rY - (a.y - segment.y1) * rX) / den;
+    if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+    return t;
+  }
+
+  for (const layout of PRINT_LAYOUTS) {
+    await fresh(page, base);
+    await page.click('#btn-load-example');
+    await page.waitForSelector('#preview-canvas svg', { timeout: 15000 });
+    await page.selectOption('#field-layout', layout.id);
+    await page.waitForTimeout(120);
+
+    // Enter one load, so the print sheet has a measured annotation to carry. Without
+    // it the annotation layers are legitimately empty and a visibility check would
+    // pass while proving nothing.
+    const loadNode = await page.evaluate(() => {
+      const select = document.querySelector('#field-load-node');
+      return select && select.options.length ? select.options[0].value : '';
+    });
+    if (loadNode) {
+      await page.selectOption('#field-load-node', loadNode);
+      await page.fill('#field-load-value', '25');
+      await page.click('#btn-add-load');
+      await page.waitForTimeout(150);
+    }
+
+    // Capture the print document without opening a dialog.
+    await page.evaluate(() => {
+      window.__printCapture = null;
+      const make = document.createElement.bind(document);
+      document.createElement = function (tag, ...rest) {
+        const el = make(tag, ...rest);
+        if (String(tag).toLowerCase() === 'iframe') {
+          el.addEventListener('load', () => {
+            try {
+              el.contentWindow.print = () => {
+                const written = el.contentWindow.document;
+                window.__printCapture = {
+                  html: written.documentElement.outerHTML,
+                  css: Array.from(written.querySelectorAll('style'))
+                    .map((s) => s.textContent)
+                    .join('\n'),
+                };
+              };
+            } catch (error) {
+              window.__printCapture = { html: '', css: '', error: String(error) };
+            }
+          });
+        }
+        return el;
+      };
+      window.__restoreCreateElement = () => {
+        document.createElement = make;
+      };
+    });
+
+    await page.locator('#btn-print').click();
+    await page.waitForFunction(() => window.__printCapture !== null, { timeout: 8000 });
+    const captured = await page.evaluate(() => {
+      const result = window.__printCapture;
+      window.__restoreCreateElement();
+      return result;
+    });
+    const printCss = captured.css ?? '';
+    const printHtml = captured.html ?? '';
+
+    // The paper the sheet declares. This is the defect the act was opened for.
+    const pageRule = (printCss.match(/@page\s*\{[^}]*\}/) ?? [''])[0];
+    const sizeValue = (pageRule.match(/size:\s*([^;}]+)/) ?? [])[1]?.trim() ?? '';
+    check(
+      `${layout.id}: the print sheet declares its own paper size`,
+      sizeValue.toLowerCase() === layout.label.toLowerCase(),
+      `@page size "${sizeValue}" for ${layout.label}`,
+    );
+    check(
+      `${layout.id}: the print sheet declares a page margin`,
+      /margin:\s*\d/.test(pageRule),
+      pageRule.replace(/\s+/g, ' '),
+    );
+
+    // The status line has to agree with the paper, or the user is told one thing
+    // while the printer is given another.
+    const status = await page.evaluate(
+      () => document.querySelector('#export-status')?.textContent ?? '',
+    );
+    check(
+      `${layout.id}: the status line names the paper that was set`,
+      status.includes(layout.label),
+      status.trim(),
+    );
+
+    // The embedded drawing.
+    check(`${layout.id}: the print sheet embeds the drawing`, /<svg[\s>]/.test(printHtml));
+    const svgTag = (printHtml.match(/<svg[^>]*>/) ?? [''])[0];
+    const viewBox = (svgTag.match(/viewBox="([^"]+)"/) ?? [])[1] ?? '';
+    check(
+      `${layout.id}: the embedded SVG carries a viewBox`,
+      /^-?[\d.]+\s+-?[\d.]+\s+[\d.]+\s+[\d.]+$/.test(viewBox),
+      viewBox,
+    );
+    check(`${layout.id}: the drawing scales to the printed page`, /width:100%/.test(printCss));
+
+    // The symbol, read from the print sheet rather than from the preview.
+    const polygonMatch = printHtml.match(/<polygon[^>]*id="tc:[^>]*points="([^"]+)"/);
+    const points = polygonMatch ? polygonMatch[1] : '';
+    check(`${layout.id}: the printed sheet carries the TC triangle`, points.length > 0);
+
+    const vertices = points
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((pair) => {
+        const [x, y] = pair.split(',').map(Number);
+        return { x, y };
+      });
+
+    const segments = printedSegments(printHtml);
+    check(
+      `${layout.id}: the printed sheet carries conductible geometry`,
+      segments.length > 5,
+      `${segments.length} lines`,
+    );
+
+    if (vertices.length === 3) {
+      const [apex, b1, b2] = vertices;
+      const baseMid = { x: (b1.x + b2.x) / 2, y: (b1.y + b2.y) / 2 };
+
+      // Orientation: the apex is centred on the base and stands off it.
+      check(
+        `${layout.id}: the printed triangle is centred on its base`,
+        Math.abs(apex.x - baseMid.x) < 0.51 || Math.abs(apex.y - baseMid.y) < 0.51,
+        `apex (${apex.x},${apex.y}) base mid (${baseMid.x.toFixed(1)},${baseMid.y.toFixed(1)})`,
+      );
+      check(
+        `${layout.id}: the printed triangle has a positive height`,
+        Math.hypot(apex.x - baseMid.x, apex.y - baseMid.y) > 1,
+        `${Math.hypot(apex.x - baseMid.x, apex.y - baseMid.y).toFixed(2)}`,
+      );
+      check(
+        `${layout.id}: the printed base corners share an axis`,
+        Math.abs(b1.x - b2.x) < 0.51 || Math.abs(b1.y - b2.y) < 0.51,
+        `(${b1.x},${b1.y}) (${b2.x},${b2.y})`,
+      );
+
+      const endpoints = [];
+      for (const seg of segments) {
+        endpoints.push({ x: seg.x1, y: seg.y1 }, { x: seg.x2, y: seg.y2 });
+      }
+      const onPoint = (p, tol = 0.51) =>
+        endpoints.some((e) => Math.abs(e.x - p.x) < tol && Math.abs(e.y - p.y) < tol);
+
+      check(`${layout.id}: the printed conductor meets the apex`, onPoint(apex));
+      check(`${layout.id}: the printed conductor meets the base midpoint`, onPoint(baseMid));
+
+      // No conductor may run through the interior.
+      const tri = [apex, b1, b2];
+      let intrusions = 0;
+      for (const seg of segments) {
+        const isSide =
+          (Math.abs(seg.x1 - apex.x) < 0.01 &&
+            Math.abs(seg.y1 - apex.y) < 0.01 &&
+            ((Math.abs(seg.x2 - b1.x) < 0.01 && Math.abs(seg.y2 - b1.y) < 0.01) ||
+              (Math.abs(seg.x2 - b2.x) < 0.01 && Math.abs(seg.y2 - b2.y) < 0.01))) ||
+          (Math.abs(seg.x1 - b1.x) < 0.01 &&
+            Math.abs(seg.y1 - b1.y) < 0.01 &&
+            Math.abs(seg.x2 - b2.x) < 0.01 &&
+            Math.abs(seg.y2 - b2.y) < 0.01) ||
+          (Math.abs(seg.x1 - b2.x) < 0.01 &&
+            Math.abs(seg.y1 - b2.y) < 0.01 &&
+            Math.abs(seg.x2 - b1.x) < 0.01 &&
+            Math.abs(seg.y2 - b1.y) < 0.01);
+        if (isSide) continue;
+        const cuts = [0, 1];
+        for (let i = 0; i < 3; i += 1) {
+          const t = crossingT(seg, tri[i], tri[(i + 1) % 3]);
+          if (t !== null) cuts.push(t);
+        }
+        cuts.sort((p, q) => p - q);
+        for (let i = 0; i + 1 < cuts.length; i += 1) {
+          if (cuts[i + 1] - cuts[i] < 1e-9) continue;
+          const t = (cuts[i] + cuts[i + 1]) / 2;
+          const p = {
+            x: seg.x1 + (seg.x2 - seg.x1) * t,
+            y: seg.y1 + (seg.y2 - seg.y1) * t,
+          };
+          if (strictlyInside(p, tri)) {
+            intrusions += 1;
+            break;
+          }
+        }
+      }
+      check(
+        `${layout.id}: no printed conductor runs inside the triangle`,
+        intrusions === 0,
+        `${intrusions} lines`,
+      );
+
+      // The leaving span keeps one whole configured spacing on the printed sheet.
+      // The spacing is read from the field the drawing is using, never restated here.
+      const spacing = Number(await page.inputValue('#field-spacing'));
+      let leaving = 0;
+      for (const seg of segments) {
+        for (const [start, other] of [
+          [{ x: seg.x1, y: seg.y1 }, { x: seg.x2, y: seg.y2 }],
+          [{ x: seg.x2, y: seg.y2 }, { x: seg.x1, y: seg.y1 }],
+        ]) {
+          if (Math.abs(start.x - baseMid.x) > 0.51 || Math.abs(start.y - baseMid.y) > 0.51) {
+            continue;
+          }
+          const length = Math.hypot(other.x - start.x, other.y - start.y);
+          if (length > leaving) leaving = length;
+        }
+      }
+      check(
+        `${layout.id}: the printed leaving span equals the configured spacing`,
+        spacing > 0 && Math.abs(leaving - spacing) < 0.6,
+        `${leaving.toFixed(2)} px against a ${spacing} px spacing`,
+      );
+    } else {
+      check(`${layout.id}: the printed triangle has three points`, false, `${vertices.length}`);
+    }
+
+    // Markers survive the print path, and the print visibility rules hold: loads and
+    // span labels are kept, while the drawing's own point labels and any status
+    // banner or notice are not printed.
+    check(`${layout.id}: the printed sheet keeps the TC markers`, /<polygon /.test(printHtml));
+    // A load is entered before printing so the annotation is present to be checked.
+    // A print sheet is only meaningful if it carries the measured data the drawing
+    // holds, and the export visibility rules are what decide that per profile.
+    check(
+      `${layout.id}: the printed sheet keeps the entered load as a callout`,
+      /id="callout:/.test(printHtml),
+    );
+    check(
+      `${layout.id}: the printed sheet keeps the span labels`,
+      /id="span-lengths"|id="span:/.test(printHtml),
+    );
+    check(
+      `${layout.id}: the printed sheet hides the incomplete-measurement banner`,
+      !/Span measurements incomplete/.test(printHtml),
+    );
+    check(`${layout.id}: the printed sheet has no notice group`, !/id="notice"/.test(printHtml));
+    check(
+      `${layout.id}: the printed sheet hides the alphabetical point labels`,
+      !/id="point-designations"/.test(printHtml),
+    );
+    check(`${layout.id}: the printed sheet hides the Origin label`, !/>Origin</.test(printHtml));
+  }
 
   /* ---------------- TC marker geometry ---------------- */
 

@@ -25,7 +25,7 @@ import test from 'node:test';
 import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
 
-import { EXAMPLE_ROUTES, PAGE_LAYOUTS } from '../src/config.js';
+import { DEFAULT_CONFIG, EXAMPLE_ROUTES, PAGE_LAYOUTS } from '../src/config.js';
 import { resolveExampleRoutes } from '../src/ui/example.js';
 import { buildNetwork } from '../src/geometry/network.js';
 import { buildScene } from '../src/geometry/scene.js';
@@ -394,10 +394,12 @@ for (const layoutId of LAYOUT_IDS) {
 
     assert.ok(leaving, `${layoutId}: a conductor leaves the base midpoint`);
 
-    // The scene already knows the span; assert the page respects it. The span is
-    // measured along the route axis, and its page length is the scene spacing
-    // carried through the same transform everything else uses.
-    const sceneSpan = 40; // one configured spacing, the drawing's default
+    // The scene carries the spacing it was actually laid out with, so the expected
+    // page length is derived rather than written down here. A test that repeats the
+    // configuration's constant cannot notice the configuration changing, and it
+    // silently re-checks the default on every layout even when a different spacing
+    // produced the drawing under test.
+    const sceneSpan = scene.spanLength;
     const expected = sceneSpan * fit.scale;
     assert.ok(
       Math.abs(leaving.length - expected) < 1e-2,
@@ -489,4 +491,153 @@ test('the correction survives a compressed production PDF, not only an uncompres
     triangle,
   );
   assert.deepEqual(intrusions, [], 'no conductor enters the triangle in the compressed file');
+});
+
+/* ------------------------------------------------------------------------ */
+/* The spacing is the scene's, not a constant in this file                   */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Spacings under test: the configured default, and values above and below it.
+ *
+ * A single spacing proves nothing about the arithmetic, because a renderer that
+ * ignored the spacing entirely would still look correct when the drawing happened
+ * to be made at the default. Driving two spacings that are not the default makes
+ * the expected page length change, which is the only way the assertion can fail
+ * for the right reason. Every value stays at or above the clearance minimum the
+ * application enforces, so no case is a drawing the product would refuse to
+ * export.
+ */
+const SPACINGS = [
+  DEFAULT_CONFIG.spanLength,
+  DEFAULT_CONFIG.spanLength * 1.5,
+  DEFAULT_CONFIG.spanLength + 20,
+];
+
+/** The conductor leaving the base midpoint, measured in page units. */
+function leavingSpan(segments, triangle) {
+  const baseMid = {
+    x: (triangle[1].x + triangle[2].x) / 2,
+    y: (triangle[1].y + triangle[2].y) / 2,
+  };
+  let longest = null;
+  for (const s of segments) {
+    const startsHere = Math.abs(s.x1 - baseMid.x) < 1e-3 && Math.abs(s.y1 - baseMid.y) < 1e-3;
+    const endsHere = Math.abs(s.x2 - baseMid.x) < 1e-3 && Math.abs(s.y2 - baseMid.y) < 1e-3;
+    if (!startsHere && !endsHere) continue;
+    const other = startsHere ? { x: s.x2, y: s.y2 } : { x: s.x1, y: s.y1 };
+    const length = distance(baseMid, other);
+    // The symbol's own sides also meet the base midpoint, so the span is the longest
+    // conductor leaving it, not an edge of the triangle.
+    if (!longest || length > longest) longest = length;
+  }
+  return { length: longest, baseMid };
+}
+
+test('the spacing under test is taken from the configuration, not restated here', () => {
+  // The default is read from DEFAULT_CONFIG. If this file ever grows its own copy of
+  // that number, changing the configuration would leave these tests asserting the
+  // old value and passing for the wrong reason.
+  assert.equal(
+    typeof DEFAULT_CONFIG.spanLength,
+    'number',
+    'the default spacing is a configured number',
+  );
+  assert.ok(DEFAULT_CONFIG.spanLength > 0);
+  assert.ok(new Set(SPACINGS).size >= 2, 'at least two distinct spacings are exercised');
+  assert.ok(
+    SPACINGS.some((s) => s !== DEFAULT_CONFIG.spanLength),
+    'a non-default spacing is exercised',
+  );
+});
+
+test('the scene reports the spacing it was actually laid out with', () => {
+  // This is what makes deriving the expectation meaningful: the scene answers for
+  // its own spacing, so a test cannot be measuring the default while claiming to
+  // measure an override.
+  const network = exampleNetwork();
+  for (const spacing of SPACINGS) {
+    const scene = buildScene(network, 'pdf', { spanLength: spacing });
+    assert.equal(scene.spanLength, spacing, `the scene was laid out at ${spacing} px`);
+  }
+});
+
+for (const spacing of SPACINGS) {
+  test(`the whole drawing holds up at a ${spacing} px spacing`, () => {
+    const network = exampleNetwork();
+    for (const layoutId of LAYOUT_IDS) {
+      const scene = buildScene(network, 'pdf', { spanLength: spacing });
+      // Guard the derivation: the scene must be the one this case is about.
+      assert.equal(scene.spanLength, spacing, `${layoutId}: the scene carries the spacing`);
+
+      const { triangle, anchor, fit, segments } = renderLayout(scene, layoutId);
+      const label = `${layoutId}/${spacing}px`;
+
+      // The symbol still follows the page transform at this spacing.
+      const baseWidth = distance(triangle[1], triangle[2]);
+      assert.ok(
+        Math.abs(baseWidth - anchor.halfWidth * 2 * fit.scale) < 1e-6,
+        `${label}: the base is at page scale`,
+      );
+      const height = Math.abs(triangle[0].y - triangle[1].y);
+      assert.ok(
+        Math.abs(height - anchor.height * fit.scale) < 1e-6,
+        `${label}: the height is at page scale`,
+      );
+
+      // The interior stays empty.
+      const keys = sideKeys(triangle);
+      const intrusions = segmentsInside(
+        segments.filter(
+          (s) => !keys.has(`${s.x1.toFixed(3)},${s.y1.toFixed(3)}>${s.x2.toFixed(3)},${s.y2.toFixed(3)}`),
+        ),
+        triangle,
+      );
+      assert.deepEqual(intrusions, [], `${label}: no conductor enters the triangle`);
+
+      // The two attachments are still on the axis.
+      const apex = triangle[0];
+      const { baseMid, length } = leavingSpan(segments, triangle);
+      assert.ok(touches(segments, apex), `${label}: a conductor meets the apex`);
+      assert.ok(touches(segments, baseMid), `${label}: a conductor meets the base midpoint`);
+
+      // And the leaving span is one whole configured spacing on the page, with the
+      // expected value derived from the scene rather than written down here.
+      const expected = scene.spanLength * fit.scale;
+      assert.ok(
+        Math.abs(length - expected) < 1e-2,
+        `${label}: the leaving span is ${length.toFixed(3)} pt, expected ${expected.toFixed(3)} pt`,
+      );
+    }
+  });
+}
+
+test('the same drawing measures differently at different spacings', () => {
+  // If the page length were the same across spacings, the derivation above would be
+  // vacuous and a hardcoded expectation would pass just as well. Proving the
+  // measured value moves with the spacing is what makes the loop above meaningful.
+  const network = exampleNetwork();
+  const layoutId = LAYOUT_IDS[0];
+  const measured = [];
+  for (const spacing of SPACINGS) {
+    const scene = buildScene(network, 'pdf', { spanLength: spacing });
+    const { triangle, fit, segments } = renderLayout(scene, layoutId);
+    const { length } = leavingSpan(segments, triangle);
+    measured.push({ spacing, length, expected: scene.spanLength * fit.scale });
+  }
+
+  for (const entry of measured) {
+    assert.ok(
+      Math.abs(entry.length - entry.expected) < 1e-2,
+      `${entry.spacing} px: measured ${entry.length.toFixed(3)} pt matches its own expectation`,
+    );
+  }
+
+  // At least two of the resulting page lengths have to differ, or spacing had no
+  // effect on what was drawn.
+  const distinct = new Set(measured.map((m) => m.length.toFixed(2)));
+  assert.ok(
+    distinct.size >= 2,
+    `the page span moved with the spacing: ${measured.map((m) => `${m.spacing}px=${m.length.toFixed(2)}pt`).join(', ')}`,
+  );
 });

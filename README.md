@@ -168,6 +168,11 @@ Origin name and the alphabetical labels - and keep everything that is a fact abo
 the installation: the FPB label, the load callouts and the span lengths. The
 drawing itself is never modified, so the preview stays complete.
 
+**The printed sheet uses the page layout you chose.** A drawing set to A3 or Letter
+is printed on A3 or Letter, in the orientation that layout declares, and the
+drawing is scaled to that paper. Each layout carries its own CSS page size, so the
+sheet and the drawing cannot disagree about what paper they are for.
+
 All three outputs are rendered from one annotated scene, so a callout points at the
 same pole and reads the same numbers on screen, in the PDF and in the SVG. The PDF
 stays fully vector: leaders are stroked lines, arrowheads filled triangles and every

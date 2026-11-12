@@ -1262,7 +1262,10 @@ function printDrawing() {
   doc.write(
     '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Line route drawing</title>' +
       '<style>@page{size:' +
-      (layout.orientation === 'portrait' ? 'A4 portrait' : 'A4 landscape') +
+      // The paper comes from the chosen layout, not from a fixed A4. A drawing
+      // set to A3 or Letter used to be sent to the printer as A4, so the sheet
+      // was the wrong size and the drawing was scaled for paper it was not on.
+      layout.cssPageSize +
       ';margin:10mm}html,body{margin:0;padding:0}svg{display:block;width:100%;height:auto}' +
       '</style></head><body>' +
       renderSceneToSvg(scene, { standalone: false }) +

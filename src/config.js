@@ -106,8 +106,50 @@ export const MARKER_KINDS = Object.freeze({
 });
 
 /** Page layouts offered for PDF export and printing. */
+
+/**
+ * The CSS `@page size` keyword for a paper format.
+ *
+ * CSS names a paper size by a keyword, not by the format key the PDF writer uses,
+ * and the two spellings differ for Letter. Keeping the mapping here means the print
+ * stylesheet and the PDF renderer cannot drift apart on what paper "letter" means.
+ *
+ * @param {string} format One of the `format` values below.
+ * @returns {string} A CSS page-size keyword.
+ */
+function cssFormatName(format) {
+  switch (format) {
+    case 'a3':
+      return 'A3';
+    case 'letter':
+      return 'Letter';
+    case 'a4':
+    default:
+      return 'A4';
+  }
+}
+
+/**
+ * A page layout: the paper, and the CSS spelling of the same paper.
+ *
+ * `cssPageSize` exists because the browser print sheet is produced from CSS, and
+ * the rule it needs is `@page{size:A3 landscape}` rather than the format key. Every
+ * layout carries its own value so the print path never has to guess which paper the
+ * user chose; before this, the print stylesheet hardcoded A4 and printed an A3 or
+ * Letter drawing onto A4 paper.
+ *
+ * @param {{id: string, label: string, widthPt: number, heightPt: number, format: string, orientation: string}} layout
+ * @returns {Readonly<object>} A frozen layout.
+ */
+function layout(spec) {
+  return Object.freeze({
+    ...spec,
+    cssPageSize: `${cssFormatName(spec.format)} ${spec.orientation}`,
+  });
+}
+
 export const PAGE_LAYOUTS = Object.freeze({
-  a4_landscape: Object.freeze({
+  a4_landscape: layout({
     id: 'a4_landscape',
     label: 'A4 landscape',
     widthPt: 841.89,
@@ -115,7 +157,7 @@ export const PAGE_LAYOUTS = Object.freeze({
     format: 'a4',
     orientation: 'landscape',
   }),
-  a4_portrait: Object.freeze({
+  a4_portrait: layout({
     id: 'a4_portrait',
     label: 'A4 portrait',
     widthPt: 595.28,
@@ -123,7 +165,7 @@ export const PAGE_LAYOUTS = Object.freeze({
     format: 'a4',
     orientation: 'portrait',
   }),
-  a3_landscape: Object.freeze({
+  a3_landscape: layout({
     id: 'a3_landscape',
     label: 'A3 landscape',
     widthPt: 1190.55,
@@ -131,7 +173,7 @@ export const PAGE_LAYOUTS = Object.freeze({
     format: 'a3',
     orientation: 'landscape',
   }),
-  letter_landscape: Object.freeze({
+  letter_landscape: layout({
     id: 'letter_landscape',
     label: 'Letter landscape',
     widthPt: 792,
