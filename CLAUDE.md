@@ -34,7 +34,7 @@ node scripts/serve.js          # run the app: http://127.0.0.1:8080/
 node scripts/serve.js 3000     # or pick a port
 
 npm test                       # 477 Node tests, no dependencies needed (~1.2s)
-npm run test:browser           # 230 browser checks (needs Playwright + Chrome)
+npm run test:browser           # 244 browser checks (needs Playwright + Chrome)
 npm run test:print:headed      # manual print-dialog check; needs a real terminal
 ```
 
@@ -110,7 +110,7 @@ run without a browser. They currently hold; keep them holding.
 | `originMarker` values | **`plain` / `tc` / `fpb`** (not `pole`) |
 | Storage key | `line-route-drawing:v3:project` |
 | Load units | `kVA` (default), `kW`, `kVAr`, `HP` — never summed, never converted |
-| TC / FPB eligibility | A TC point is **not** load-eligible (`isLoadEligible()`). Guarded at four boundaries: `addLoad()` (create) and `reassignLoad()` (move) both fail closed (`MISSING_NODE_RESOLVER` / `UNRESOLVED_LOAD_TARGET` / `INELIGIBLE_LOAD_TARGET`, plus `UNKNOWN_LOAD` on move); the project parser refuses the file; the import planner refuses the row and refuses outright without both `lookupNode` and `isEligible`. `updateLoad()` cannot change a target at all |
+| TC / FPB eligibility | A TC point is **not** load-eligible (`isLoadEligible()`). Guarded at five boundaries: `addLoad()` (create) and `reassignLoad()` (move) both fail closed (`MISSING_NODE_RESOLVER` / `UNRESOLVED_LOAD_TARGET` / `INELIGIBLE_LOAD_TARGET`, plus `UNKNOWN_LOAD` on move); **route edit refuses to make a loaded destination a TC point** before writing anything; the project parser refuses the file; the import planner refuses the row and refuses outright without both `lookupNode` and `isEligible`. `updateLoad()` cannot change a target at all |
 | Span separator | en dash `U+2013` (`A1–A2`); unmeasured label is `— m` |
 
 ### The two identity systems are different things

@@ -17,6 +17,40 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Fixed
 
+- **Editing a route to make its destination a TC point could save a project the app
+  cannot reopen.** If the destination carried a load, the edit saved happily and left the
+  load on a point that is no longer load-eligible. The app's own parser then refused that
+  file, so the next visit showed the bundled example, paused automatic saving and stranded
+  the drawing behind a recovery banner — permanent-looking data loss from one save.
+  Reproduced through the UI before the fix. The edit is now **refused before anything is
+  written**, with the form left in edit mode and a message naming the load and the action:
+
+  > This route cannot be changed to a TC point while it carries a load: 1 load (25 kVA)
+  > on its destination. Move or remove it on the Loads tab first, then change the point to TC.
+
+  Deleting, transferring or orphaning the load were each rejected as silent data loss.
+  Making a destination TC when it carries no load is unaffected.
+
+### Added
+
+- Browser suite section **Changing a destination to a TC point** (14 checks), bringing the
+  suite to 244 checks in 13 sections. It drives the refusal through the real form and
+  asserts the route, load id, value and unit survive, the project is still **openable by
+  `parseProjectJson`**, and a reload shows no recovery banner; then that the permitted
+  transition (no load) still works and that removing the load makes the same edit succeed.
+- The **Manual annotation placement** section now builds its own callout fixture instead of
+  inheriting one from the route-edit section, which it had silently depended on.
+
+### Validation
+
+- `npm test` → 477 tests, 477 pass, 0 fail.
+- `npm run test:browser` → 244/244 checks passed, 13 sections (was 230/230 in 12).
+- Mutation: removing the route-edit guard reproduces the original defect — 7 checks fail,
+  including the reload assertion, which reports the exact "cannot be opened" banner.
+- `src/ui/app.js` restored byte-for-byte afterwards; suites re-run green.
+
+### Fixed
+
 - **`reassignLoad()` could move a load onto a TC point.** Guarding creation but not
   movement enforced the rule on one path and left it bypassable on the other, one step
   later. Reproduced:

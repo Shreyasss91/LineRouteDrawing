@@ -13,7 +13,7 @@ import { buildNetwork } from '../geometry/network.js';
 import { buildScene } from '../geometry/scene.js';
 import { createSpanLengths } from '../data/schedules.js';
 import { createNetworkPanel } from './network_panel.js';
-import { buildAssetRegistry, spanAssetId } from '../geometry/assets.js';
+import { buildAssetRegistry, destinationAssetId, spanAssetId } from '../geometry/assets.js';
 import { allocateDesignations, countersFromDesignations } from '../geometry/designations.js';
 import {
   buildDesignationOverlay,
@@ -1106,11 +1106,33 @@ function handleSubmit(event) {
   if (state.selectedId) {
     const index = state.routes.findIndex((r) => r.id === state.selectedId);
     if (index >= 0) {
-      const previousTc = state.routes[index].tc;
+      // Making a destination a TC point makes it unable to carry a load, so a load
+      // already sitting there would become exactly the state the project parser refuses
+      // to reopen - the route edit would save a file the app cannot load.
+      //
+      // Refusing is the only safe choice: silently deleting the load loses data the user
+      // did not ask to lose, silently moving it puts a number on a pole they did not
+      // choose, and orphaning it produces a project that fails to open. So the edit is
+      // stopped and the user is told which load to move, through the supported action
+      // (Loads tab -> Reassign), and then to try again.
+      const becomesTc = result.value.tc === true && state.routes[index].tc !== true;
+      if (becomesTc) {
+        const destinationId = destinationAssetId(state.routes[index].id);
+        const attached = (state.loads ?? []).filter((load) => load.nodeId === destinationId);
+        if (attached.length > 0) {
+          const which = attached
+            .map((load) => `${load.value} ${load.unit}`)
+            .join(', ');
+          showFormError(
+            `This route cannot be changed to a TC point while it carries a load: ` +
+              `${attached.length} load${attached.length === 1 ? '' : 's'} (${which}) ` +
+              `on its destination. Move or remove ${attached.length === 1 ? 'it' : 'them'} ` +
+              `on the Loads tab first, then change the point to TC.`,
+          );
+          return;
+        }
+      }
       state.routes[index] = { ...state.routes[index], ...result.value };
-      // A TC flag change can alter which endpoints exist downstream, so the
-      // whole list is re-evaluated by refresh(). Nothing is dropped.
-      void previousTc;
     }
   } else {
     state.routes.push(createRoute(result.value));

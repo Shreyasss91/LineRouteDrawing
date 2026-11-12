@@ -17,7 +17,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F7](#f7-route-entry-has-no-undo-and-no-row-reordering) | Data safety | Medium | Open — by design |
 | [F8](#f8-appjs-is-a-1590-line-controller) | Maintainability | Low | Open |
 | [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | Open |
-| [F10](#f10-a-load-cannot-reach-a-tc-point-by-creation-move-import-or-file) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — four guarded boundaries covering creation, move, import and file; fail-closed, each with executable evidence |
+| [F10](#f10-a-load-cannot-reach-a-tc-point-by-creation-move-edit-import-or-file) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — five guarded boundaries covering creation, move, route edit, import and file; fail-closed, each with executable evidence |
 
 ---
 
@@ -210,11 +210,11 @@ against obstacles, which is the most likely superlinear cost.
 **Suggested fix.** Add a scripted large-drawing timing check before claiming any scale
 limit.
 
-## F10 — A load cannot reach a TC point by creation, move, import or file
+## F10 — A load cannot reach a TC point by creation, move, edit, import or file
 
-**Status: closed.** Enforced at four guarded boundaries, each with its own executable
-coverage; the optional-resolver bypass is fixed, and both target-*changing* operations
-are covered.
+**Status: closed.** Enforced at five guarded boundaries, each with its own executable
+coverage; the optional-resolver bypass and the unguarded reassignment are fixed, and the
+route-edit transition that could strand a project is refused.
 
 **Observed originally.** A TC point is documented as not load-eligible, and
 `isLoadEligible('tc') === false` was asserted by `test/schedules.test.js` test 15 and
@@ -269,6 +269,10 @@ another's job:
    refuses outright with `missing-capability` if it is given neither or only one of
    `lookupNode` and `isEligible`, because it could not verify any target. This is the
    shared planner behind both CSV import and clipboard paste.
+5. Route edit (`handleSubmit()` in `src/ui/app.js`) — **refuses to turn a destination
+   into a TC point while it carries a load**, showing the load's value and pointing at
+   the Loads tab. This is the most severe of the five, because it is the only one that
+   could produce a project the app cannot reopen (see below).
 
 `insertLoadRecord()`, `insertReassignedLoad()` and `applyNodeLoadPlan()` are **unguarded
 by design** and are not counted as boundaries: the first two are the primitives beneath
@@ -279,6 +283,36 @@ the guarded operations, the third trusts a plan the planner already validated.
 - `updateLoad()` cannot change a load's point — `nodeId` is deliberately not taken from
   its patch — so editing a value can never re-target a load (test 3 pins this).
 - `removeLoad()` and `removeLoadsForNode()` only remove.
+
+**The route-edit transition, reproduced in a real browser.** The audit above covers
+operations that move a *load*. Changing a *point* can invalidate a load that is already
+correct, and that path had no guard at all — `handleSubmit()` carried a comment saying a
+TC flag change "can alter which endpoints exist downstream" and that "Nothing is
+dropped", which was accurate and was the problem. Steps, all through the UI:
+
+1. add a route whose destination is an ordinary pole;
+2. attach a 25 kVA load to that destination;
+3. open Edit on the route, tick **TC point**, save;
+4. the route saves with `tc: true` and the load is still on `dst:<routeId>`;
+5. `parseProjectJson` on the project just saved returns
+   **`INELIGIBLE_LOAD_TARGET`** — the app had written a file it refuses to read.
+
+The practical consequence is the worst in this finding: on the next visit the project
+cannot be opened, the bundled example loads instead, automatic saving is paused, and the
+user's drawing is stranded behind a recovery banner. The edit turned a working drawing
+into an unreopenable one in a single save, with no warning.
+
+**Fix.** The edit is refused *before* the route is replaced, so nothing is written. The
+message names the load and the action:
+
+> This route cannot be changed to a TC point while it carries a load: 1 load (25 kVA)
+on its destination. Move or remove it on the Loads tab first, then change the point to TC.
+
+The three silent alternatives were each rejected: deleting the load loses data the user
+did not ask to lose, transferring it puts a number on a point they did not choose, and
+orphaning it yields a project that fails to open. Refusing keeps the user in control and
+leaves the form in edit mode so the fix and retry are one step. Making a destination TC
+when it carries **no** load is unaffected, so the rule is not over-applied.
 
 **A bug the new tests caught.** The first attempt resolved the target with
 `registry.nodeAsset(id)`, which only knows canonical ids, so an **aliased coordinate

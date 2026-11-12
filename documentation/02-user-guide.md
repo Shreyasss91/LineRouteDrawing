@@ -147,6 +147,30 @@ edited route starts from, flips the direction, saves through the form, and asser
 id, the load, the neighbouring rows, the designations and a reload
 ([findings F2](findings.md#f2-an-edited-route-is-now-covered-by-a-browser-test)).
 
+### One edit is refused: making a loaded destination a TC point
+
+Ticking **TC point** on an edit whose destination already carries a load is **refused**,
+with the error shown in the form and the edit left in progress so it can be retried:
+
+> This route cannot be changed to a TC point while it carries a load: 1 load (25 kVA)
+on its destination. Move or remove it on the Loads tab first, then change the point to TC.
+
+A TC point cannot carry a load, so allowing the edit produced a project the app's own
+parser refuses to reopen: the drawing was replaced by the example on the next visit,
+auto-save paused, and the work stranded behind a recovery banner. The three silent
+alternatives were all rejected as worse — deleting the load loses data the user did not
+ask to lose, moving it puts a number on a point they did not choose, and orphaning it
+gives a project that fails to open.
+
+So the order is: move the load on the **Loads** tab (or remove it), then make the point
+TC. Every other edit is unaffected, including making a destination TC when it carries no
+load. The browser suite's **Changing a destination to a TC point** section (§6) covers
+both the refusal and the allowed transition, and asserts the saved project is still
+openable and reloads without a banner.
+
+This is the one place the form refuses a *topology* edit rather than a value, and the
+message says which load and where to fix it rather than only that something is wrong.
+
 One caveat about the *topology* rather than the identity: a direction change can
 legitimately alter the drawing. If the new direction runs through an existing point, the
 route now ends somewhere else and downstream rows may become invalid (they are kept and
@@ -259,7 +283,7 @@ Form: `#field-load-node` (Point), `#field-load-value`, `#field-load-unit`
 
 - **Eligible points:** `pole`, `fpb`, `origin` (`LOAD_ELIGIBLE_TYPES` / `isLoadEligible()`
   in [src/data/schedules.js](../src/data/schedules.js)). A **TC point is not eligible**.
-- The rule is enforced at four *guarded* boundaries, each with its own error:
+- The rule is enforced at five *guarded* boundaries, each with its own error:
 
   | Boundary | What it does | Error |
   | --- | --- | --- |
@@ -267,6 +291,7 @@ Form: `#field-load-node` (Point), `#field-load-value`, `#field-load-unit`
   | `reassignLoad()` — moving an existing load | same contract as `addLoad()`, because moving a load is the other way one reaches a point; adds `UNKNOWN_LOAD` for a stale record id | `MISSING_NODE_RESOLVER`, `UNRESOLVED_LOAD_TARGET`, `INELIGIBLE_LOAD_TARGET`, `UNKNOWN_LOAD` |
   | Project parser (`validateMeasuredData`) | refuses the whole file | `INELIGIBLE_LOAD_TARGET` |
   | Schedule import planner (`parseNodeLoadImport`) | refuses the row during planning, before any plan exists; also refuses outright if it is not given both `lookupNode` and `isEligible`, since it could not verify anything | `bad-value` with a detail naming the TC rule; `missing-capability` for absent dependencies |
+  | Route edit (`handleSubmit()`) | refuses to turn a loaded destination into a TC point before anything is written, naming the load | form error: *"This route cannot be changed to a TC point while it carries a load…"* |
 
 - All four resolve the target through the asset registry, so an aliased coordinate
   spelling is judged by what it resolves to.
@@ -275,10 +300,10 @@ Form: `#field-load-node` (Point), `#field-load-value`, `#field-load-unit`
   for callers that already know the target is valid. No user-reachable action calls them
   directly.
 - Similarly, `applyNodeLoadPlan()` is a pure applier that trusts a plan already validated
-  by the planner. It is not a fifth boundary.
+  by the planner. It is not a sixth boundary.
 - `updateLoad()` **cannot** change a load's point: `nodeId` is deliberately not taken
   from its patch, so editing a value never needs an eligibility check.
-- `test/load_eligibility.test.js` (19 tests) covers all four guarded boundaries
+- `test/load_eligibility.test.js` (19 tests) covers the guarded boundaries
   including the fail-closed cases; `test/schedules.test.js` test 15 and
   `test/annotations.test.js` test 27 pin the predicate itself.
 - **Value:** must be a finite number `> 0`. Zero is refused rather than treated as

@@ -82,7 +82,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Default unit kVA | Verified | `schedules.test.js` | — |
 | One callout per pole with one line per record | Verified | `browser` "one callout shows all three loads, unsummed", `annotations.test.js` | — |
 | Loads never summed, never converted | Verified | `schedules.test.js` | **By design**; see `10-limitations.md` §4 |
-| TC not load-eligible | Verified | `load_eligibility.test.js` (19 tests) drives all four guarded boundaries; `schedules.test.js` test 15 and `annotations.test.js` test 27 pin the predicate | `addLoad()` and `reassignLoad()` both fail closed (`MISSING_NODE_RESOLVER`, `UNRESOLVED_LOAD_TARGET`, `INELIGIBLE_LOAD_TARGET`, plus `UNKNOWN_LOAD` for a stale id on move); the project parser refuses the file; `parseNodeLoadImport` refuses the row before a plan exists and refuses outright without both `lookupNode` and `isEligible`. `updateLoad()` cannot change a target at all. Targets resolved through the asset registry, so aliased spellings are judged by what they resolve to. `insertLoadRecord()` and `insertReassignedLoad()` are unguarded by design and are not counted here |
+| TC not load-eligible | Verified | `load_eligibility.test.js` (19 tests) drives the model, reassignment and import boundaries, and browser §6 drives the route-edit transition; `schedules.test.js` test 15 and `annotations.test.js` test 27 pin the predicate | `addLoad()` and `reassignLoad()` both fail closed (`MISSING_NODE_RESOLVER`, `UNRESOLVED_LOAD_TARGET`, `INELIGIBLE_LOAD_TARGET`, plus `UNKNOWN_LOAD` for a stale id on move); the project parser refuses the file; `parseNodeLoadImport` refuses the row before a plan exists and refuses outright without both `lookupNode` and `isEligible`. `updateLoad()` cannot change a target at all. Targets resolved through the asset registry, so aliased spellings are judged by what they resolve to. `insertLoadRecord()` and `insertReassignedLoad()` are unguarded by design and are not counted here. Turning a loaded destination into a TC point is refused by the form before anything is written, because it would otherwise save a project the parser rejects |
 | Value must be `> 0` (zero refused) | Verified | `schedules.test.js` | Blank means "no load" |
 | Editing a load's value in place | Verified | `network_panel.js`, `schedules.test.js` | — |
 | Reassign an unresolved load | Verified | `schedules.test.js`, `reconcile.test.js` | Keeps id and value |
@@ -186,7 +186,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | Runs fully offline from the local filesystem | Verified | No network requests in the source; jsPDF vendored | `file://` disables the clipboard fallback path |
 | Works from `npm run serve` | Verified | `scripts/serve.js`, used by `test-browser.mjs` | — |
-| Chromium (via Playwright) | Verified | 230 browser checks | — |
+| Chromium (via Playwright) | Verified | 244 browser checks | — |
 | Chrome, manually | Verified (manual) | Print-dialog validation | — |
 | Firefox | **Incomplete validation** | Nothing browser-specific in the source | Never run |
 | Safari / iOS | **Incomplete validation** | Nothing browser-specific | Never run |

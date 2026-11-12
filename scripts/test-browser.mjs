@@ -749,9 +749,165 @@ try {
     (await page.locator('#preview-canvas g[id^="callout:"]').count()) === 1,
   );
 
+  /* ---------------- Changing a destination to a TC point ---------------- */
+
+  section('Changing a destination to a TC point');
+
+  // A TC point cannot carry a load, so turning an ordinary destination into one while it
+  // holds a load used to save a project the app itself refuses to reopen: the parser
+  // rejects it with INELIGIBLE_LOAD_TARGET, the bundled example loads instead, auto-save
+  // pauses and the user's drawing is stranded. That was reproduced before the guard was
+  // added, and this section is the regression test for it.
+  //
+  // The guard refuses the edit rather than silently deleting, moving or orphaning the
+  // load, so the checks below pin BOTH halves: the refusal keeps the data, and the
+  // ordinary transition (no load attached) still works so the rule is not over-refused.
+  const formErrorText = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('#form-error');
+      return el && !el.hidden ? el.textContent.trim() : null;
+    });
+
+  // A destination with no load is not obstructed: the plain TC transition must survive.
+  await fresh(page, base);
+  await page.click('#btn-clear');
+  await page.waitForTimeout(250);
+  await addRoute(page, { from: 'origin', direction: 'south', spans: 1 });
+  const cleanRows = await readRouteRows(page);
+  const cleanId = cleanRows[0].id;
+  check('the TC fixture has one route', cleanRows.length === 1, `${cleanRows.length} rows`);
+
+  await page.locator(`#route-rows tr[data-id="${cleanId}"] button[data-action="edit"]`).click();
+  await page.waitForTimeout(250);
+  await page.check('#field-tc');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(400);
+  const cleanSaved = await readSavedProject(page);
+  check(
+    'a destination with no load can still be made a TC point',
+    cleanSaved?.routes?.[0]?.tc === true,
+    JSON.stringify(cleanSaved?.routes?.[0]),
+  );
+  check('no error is shown for a permitted transition', (await formErrorText()) === null);
+
+  // Now the guarded case: a destination that does carry a load.
+  await fresh(page, base);
+  await page.click('#btn-clear');
+  await page.waitForTimeout(250);
+  await addRoute(page, { from: 'origin', direction: 'south', spans: 1 });
+  const guardedRows = await readRouteRows(page);
+  const guardedId = guardedRows[0].id;
+  const guardedDestId = `dst:${guardedId}`;
+
+  await page.click('#tab-loads');
+  await addLoad(page, { nodeId: guardedDestId, value: 25, unit: 'kVA' });
+  const beforeBlocked = await readSavedProject(page);
+  check(
+    'the load is on the destination before the TC attempt',
+    beforeBlocked?.loads?.length === 1 && beforeBlocked.loads[0].nodeId === guardedDestId,
+    JSON.stringify(beforeBlocked?.loads),
+  );
+
+  await page.locator(`#route-rows tr[data-id="${guardedId}"] button[data-action="edit"]`).click();
+  await page.waitForTimeout(250);
+  await page.check('#field-tc');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(400);
+
+  const refusal = await formErrorText();
+  check('making a loaded destination a TC point is refused', Boolean(refusal), String(refusal));
+  check(
+    'the refusal names the load and where to fix it',
+    /25 kVA/.test(refusal ?? '') && /Loads tab/.test(refusal ?? ''),
+    String(refusal),
+  );
+
+  const afterBlocked = await readSavedProject(page);
+  check(
+    'the refused edit did not change the route',
+    afterBlocked?.routes?.[0]?.tc === false,
+    JSON.stringify(afterBlocked?.routes?.[0]),
+  );
+  check(
+    'the refused edit kept the load exactly as it was',
+    afterBlocked?.loads?.length === 1 &&
+      afterBlocked.loads[0].id === beforeBlocked.loads[0].id &&
+      afterBlocked.loads[0].nodeId === guardedDestId &&
+      afterBlocked.loads[0].value === 25 &&
+      afterBlocked.loads[0].unit === 'kVA',
+    JSON.stringify(afterBlocked?.loads),
+  );
+  check(
+    'the form stays in edit mode so the user can retry',
+    /Save changes/.test(await page.locator('#btn-save-route').textContent()),
+  );
+
+  // The decisive check: what was saved must still be openable by the app's own parser.
+  // Before the guard this project contained a load on a TC point and was rejected.
+  const reopenable = await page.evaluate(async (doc) => {
+    const project = await import('./src/ui/project.js');
+    const result = project.parseProjectJson(
+      JSON.stringify({ format: 'line-route-drawing-project', schemaVersion: 3, project: doc }),
+      {},
+    );
+    return result.ok ? { ok: true } : { ok: false, code: result.code };
+  }, afterBlocked);
+  check(
+    'the saved project after a refused TC edit is still openable',
+    reopenable.ok === true,
+    JSON.stringify(reopenable),
+  );
+
+  // A reload must come up cleanly - no "cannot be opened" recovery banner.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg', { timeout: 15000 });
+  const reloadNotice = await page.evaluate(() => {
+    const text = document.body.innerText;
+    const hit = text.match(/[^\n]*cannot be opened[^\n]*/i);
+    return hit ? hit[0].trim() : null;
+  });
+  check('reloading after the refusal produces no recovery banner', reloadNotice === null, String(reloadNotice));
+  const reloadedRows = await readRouteRows(page);
+  check(
+    'the drawing comes back as saved, with the route still a pole',
+    reloadedRows.some((r) => r.id === guardedId),
+    JSON.stringify(reloadedRows.map((r) => r.id)),
+  );
+
+  // Then the supported route to the same end state: remove the load, retry, and the
+  // transition succeeds - so the guard blocks the invalid order of operations only.
+  await page.click('#tab-loads');
+  await page.waitForTimeout(200);
+  await page.locator('#load-rows button').filter({ hasText: 'Remove' }).first().click();
+  await page.waitForTimeout(300);
+  await page.locator(`#route-rows tr[data-id="${guardedId}"] button[data-action="edit"]`).click();
+  await page.waitForTimeout(250);
+  await page.check('#field-tc');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(400);
+  const recovered = await readSavedProject(page);
+  check(
+    'after removing the load the same transition is allowed',
+    recovered?.routes?.[0]?.tc === true && recovered?.loads?.length === 0,
+    JSON.stringify({ route: recovered?.routes?.[0], loads: recovered?.loads }),
+  );
+  check('no error is shown the second time', (await formErrorText()) === null);
+
   /* ---------------- Dragging a callout ---------------- */
 
   section('Manual annotation placement');
+
+  // This section needs a callout to drag, so it builds its own fixture rather than
+  // inheriting one. It used to depend on the callout left behind by the route-edit
+  // section, which made it fail whenever a section in between changed the loads - a
+  // coupling that had nothing to do with dragging.
+  await fresh(page, base);
+  await page.click('#btn-clear');
+  await page.waitForTimeout(250);
+  await addRoute(page, { from: 'origin', direction: 'south', spans: 2 });
+  const dragRows = await readRouteRows(page);
+  await page.click('#tab-loads');
+  await addLoad(page, { nodeId: `dst:${dragRows[0].id}`, value: 40, unit: 'kVA' });
 
   // Start from a known view. Clicking a pole in the previous section can leave the
   // drawing panned so the callout sits outside the canvas, and a drag that begins on
