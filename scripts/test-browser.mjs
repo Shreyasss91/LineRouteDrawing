@@ -701,6 +701,174 @@ try {
   check('the printed sheet keeps the load callout when enabled', /id="callout:/.test(printHtml));
   check('the printed sheet keeps the markers', /<polygon /.test(printHtml));
 
+  /* ---------------- TC marker geometry ---------------- */
+
+  // The defect this section pins: the triangle used to be centred slightly above
+  // its node and hang below it, so part of the span leaving the TC was hidden
+  // behind the symbol and the cable came out shorter than the poles really are
+  // apart. The triangle is now anchored on its downstream base midpoint, which is
+  // the node itself, so the leaving span keeps its whole length and the interior
+  // of the symbol is empty.
+
+  section('TC marker geometry');
+
+  await fresh(page, base);
+  await page.click('#btn-load-example');
+  await page.waitForTimeout(700);
+
+  /** Read the drawn triangle and its neighbours out of the live drawing. */
+  const tcGeometry = await page.evaluate(() => {
+    const svg = document.querySelector('#preview-canvas svg') || document.querySelector('svg');
+    if (!svg) return null;
+    const tri = svg.querySelector('g#markers polygon, g#tc polygon, polygon[data-marker="tc"]')
+      || [...svg.querySelectorAll('polygon')].find((p) => p.closest('g'));
+    const polygons = [...svg.querySelectorAll('polygon')];
+    if (polygons.length === 0) return null;
+    const points = polygons[0]
+      .getAttribute('points')
+      .trim()
+      .split(/\s+/)
+      .map((pair) => pair.split(',').map(Number));
+    const rings = [...svg.querySelectorAll('circle')]
+      .map((c) => ({
+        cx: Number(c.getAttribute('cx')),
+        cy: Number(c.getAttribute('cy')),
+        r: Number(c.getAttribute('r')),
+      }))
+      .filter((c) => Number.isFinite(c.cx) && Number.isFinite(c.cy));
+    const lines = [...svg.querySelectorAll('line')].map((l) => ({
+      x1: Number(l.getAttribute('x1')),
+      y1: Number(l.getAttribute('y1')),
+      x2: Number(l.getAttribute('x2')),
+      y2: Number(l.getAttribute('y2')),
+    }));
+    return { points, rings, lines, tri };
+  });
+
+  check('the drawing contains a TC triangle', Boolean(tcGeometry && tcGeometry.points.length === 3));
+
+  if (tcGeometry && tcGeometry.points.length === 3) {
+    const [apex, baseRight, baseLeft] = tcGeometry.points;
+    // The base midpoint is the canonical TC node. Both base corners share it.
+    const baseMidX = (baseRight[0] + baseLeft[0]) / 2;
+    const baseMidY = (baseRight[1] + baseLeft[1]) / 2;
+    check(
+      'the triangle base corners share one axis',
+      Math.abs(baseRight[1] - baseLeft[1]) < 0.01,
+      `${baseRight[1]} vs ${baseLeft[1]}`,
+    );
+    check(
+      'the apex is upstream of the base midpoint',
+      apex[1] < baseMidY,
+      `apex y ${apex[1]}, base y ${baseMidY}`,
+    );
+    check(
+      'the apex is centred on the base',
+      Math.abs(apex[0] - baseMidX) < 0.01,
+      `apex x ${apex[0]}, base mid x ${baseMidX}`,
+    );
+    const height = baseMidY - apex[1];
+    check('the triangle has a positive height', height > 0, `${height.toFixed(2)}`);
+
+    // The pole immediately below the TC is one whole span away. Span spacing is
+    // read from the spacing field the drawing was built with.
+    const spacing = Number(await page.inputValue('#field-spacing'));
+    const below = tcGeometry.rings
+      .filter((c) => Math.abs(c.cx - baseMidX) < 0.01 && c.cy > baseMidY + 0.5)
+      .sort((a, b) => a.cy - b.cy)[0];
+    check('the next pole after the TC is drawn', Boolean(below));
+    if (below) {
+      const measured = below.cy - baseMidY;
+      check(
+        'the leaving span equals the configured spacing',
+        Math.abs(measured - spacing) < 0.51,
+        `base mid to next pole ${measured.toFixed(2)} px, spacing ${spacing} px`,
+      );
+    }
+
+    // No conductor may run inside the triangle. Sampled in the drawing's own
+    // coordinates, on the lines the browser actually rendered.
+    const strict = (x, y) => {
+      const sign = (p, q, r) => (p[0] - r[0]) * (q[1] - r[1]) - (q[0] - r[0]) * (p[1] - r[1]);
+      const d1 = sign([x, y], apex, baseRight);
+      const d2 = sign([x, y], baseRight, baseLeft);
+      const d3 = sign([x, y], baseLeft, apex);
+      const edge = 1e-3;
+      return (d1 > edge && d2 > edge && d3 > edge) || (d1 < -edge && d2 < -edge && d3 < -edge);
+    };
+    let intruders = 0;
+    for (const line of tcGeometry.lines) {
+      for (let step = 0; step <= 60; step += 1) {
+        const t = step / 60;
+        const x = line.x1 + (line.x2 - line.x1) * t;
+        const y = line.y1 + (line.y2 - line.y1) * t;
+        if (strict(x, y)) intruders += 1;
+      }
+    }
+    check('no conductor runs inside the triangle', intruders === 0, `${intruders} sampled points`);
+
+    // The arriving conductor stops at the apex.
+    const meetsApex = tcGeometry.lines.some(
+      (l) =>
+        (Math.abs(l.x1 - apex[0]) < 0.6 && Math.abs(l.y1 - apex[1]) < 0.6) ||
+        (Math.abs(l.x2 - apex[0]) < 0.6 && Math.abs(l.y2 - apex[1]) < 0.6),
+    );
+    check('the arriving conductor meets the apex', meetsApex);
+
+    // The leaving conductor starts at the base midpoint.
+    const startsAtBase = tcGeometry.lines.some(
+      (l) =>
+        (Math.abs(l.x1 - baseMidX) < 0.6 && Math.abs(l.y1 - baseMidY) < 0.6) ||
+        (Math.abs(l.x2 - baseMidX) < 0.6 && Math.abs(l.y2 - baseMidY) < 0.6),
+    );
+    check('the leaving conductor starts at the base midpoint', startsAtBase);
+
+    // The same triangle appears in the reference drawing beside the schedules.
+    const miniTriangle = await page.evaluate(() => {
+      const svg = document.querySelector('#mini-preview svg');
+      if (!svg) return null;
+      const polygons = [...svg.querySelectorAll('polygon')];
+      if (polygons.length === 0) return null;
+      return polygons[0].getAttribute('points').trim().split(/\s+/).map((p) => p.split(',').map(Number));
+    });
+    check('the reference drawing shows a TC triangle', Boolean(miniTriangle && miniTriangle.length === 3));
+    if (miniTriangle) {
+      const miniApexY = miniTriangle[0][1];
+      const miniBaseY = (miniTriangle[1][1] + miniTriangle[2][1]) / 2;
+      check('the reference triangle is oriented the same way', miniApexY < miniBaseY);
+    }
+
+    // The SVG export carries the same geometry, so the fix is not preview-only.
+    const svgText = await (async () => {
+      const file = await saveDownload(page, '#btn-svg', workdir, 'tc-geometry.svg');
+      return (await import('node:fs/promises')).readFile(file, 'utf8');
+    })();
+    const exportPolys = [...svgText.matchAll(/<polygon[^>]*points="([^"]+)"/g)].map((m) =>
+      m[1].trim().split(/\s+/).map((p) => p.split(',').map(Number)),
+    );
+    check('the SVG export contains the TC triangle', exportPolys.length >= 1);
+    if (exportPolys.length >= 1) {
+      const [eApex, eBaseRight, eBaseLeft] = exportPolys[0];
+      const eBaseMidY = (eBaseRight[1] + eBaseLeft[1]) / 2;
+      check('the exported triangle points upstream too', eApex[1] < eBaseMidY);
+      check(
+        'the exported triangle is centred on its base',
+        Math.abs(eApex[0] - (eBaseRight[0] + eBaseLeft[0]) / 2) < 0.01,
+      );
+    }
+
+    // And the PDF stays vector-only while carrying the symbol.
+    const pdfFile = await saveDownload(page, '#btn-pdf', workdir, 'tc-geometry.pdf');
+    const pdfText = pdfContent(await (await import('node:fs/promises')).readFile(pdfFile));
+    check('the PDF is still vector-only', !/\/Subtype\s*\/Image/.test(pdfText));
+    // Lines are drawn with the path operators `m` (move) and `l` (line), so a
+    // vector drawing always contains both. `re` is only used for rectangles.
+    check(
+      'the PDF carries drawn line geometry',
+      /[0-9.]+ [0-9.]+ m[ \n]/.test(pdfText) && /[0-9.]+ [0-9.]+ l[ \n]/.test(pdfText),
+    );
+  }
+
   /* ---------------- Console ---------------- */
 
   section('Console');

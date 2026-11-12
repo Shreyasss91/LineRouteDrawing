@@ -217,12 +217,16 @@ The example is stored as data in `src/config.js` and is loaded by the
 - **Recorded data is never lost silently.** A record whose pole or span was removed
   is kept as unresolved and reported, not discarded and never moved onto a different
   physical point.
-- **Span spacing has a minimum, 39 px by default.** Below it the symbols stop
+- **Span spacing has a minimum, 35 px by default.** Below it the symbols stop
   fitting between the points they mark: an FPB box is wider than the gap, so it
   swallows the neighbouring pole and can erase a whole span, and the shortest
   visible piece of line becomes too small to read. The limit is not a guess and
   not a separate setting; it is measured from the same marker shapes the
-  renderers draw, so it moves with them if their size ever changes. When the
+  renderers draw, so it moves with them if their size ever changes. The TC
+  triangle is the one shape that adapts: it is fitted into the room actually
+  available behind its point, shrinking just enough to keep a readable piece of
+  cable when a marker sits immediately upstream, so it is measured by the size it
+  can never shrink below rather than its full height. When the
   spacing is too tight, a warning names the shortest safe spacing and the three
   export buttons are disabled. The drawing stays visible and the number you
   typed is kept, so you can see the effect and decide; nothing is changed for

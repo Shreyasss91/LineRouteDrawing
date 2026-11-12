@@ -98,7 +98,7 @@ function createEndpointRegistry() {
         originMarker: markerKind,
       });
     },
-    addLabeled(position, kind) {
+    addLabeled(position, kind, createdByDirection = null) {
       const name = alphaLabel(alphaCounter++);
       return add({
         id: `endpoint:${name}`,
@@ -106,9 +106,14 @@ function createEndpointRegistry() {
         kind,
         position: { ...position },
         usedAsSource: false,
+        // The direction of the route that first created this point. It is what
+        // a symbol needs in order to know which side the cable arrives from, so
+        // the symbol can be turned to face it. Derived from the route, never
+        // asked of the user and never stored in the project file.
+        createdByDirection,
       });
     },
-    addTc(position) {
+    addTc(position, createdByDirection = null) {
       tcCounter += 1;
       return add({
         id: `tc:${tcCounter}`,
@@ -116,9 +121,10 @@ function createEndpointRegistry() {
         kind: 'tc',
         position: { ...position },
         usedAsSource: false,
+        createdByDirection,
       });
     },
-    addFpb(position) {
+    addFpb(position, createdByDirection = null) {
       fpbCounter += 1;
       return add({
         id: `fpb:${fpbCounter}`,
@@ -126,6 +132,7 @@ function createEndpointRegistry() {
         kind: 'fpb',
         position: { ...position },
         usedAsSource: false,
+        createdByDirection,
       });
     },
     get alphaCount() {
@@ -303,20 +310,25 @@ export function buildNetwork(routes, options = {}) {
     let destination = registry.all().find((e) => sameCoord(e.position, destinationPosition)) ?? null;
     if (!destination) {
       if (route.fpb) {
-        destination = registry.addFpb(destinationPosition);
+        destination = registry.addFpb(destinationPosition, direction);
       } else if (route.tc) {
-        destination = registry.addTc(destinationPosition);
+        destination = registry.addTc(destinationPosition, direction);
       } else {
-        destination = registry.addLabeled(destinationPosition, 'endpoint');
+        destination = registry.addLabeled(destinationPosition, 'endpoint', direction);
       }
     } else if (route.fpb && destination.kind !== 'fpb') {
       // The same coordinate requested as a feeder pillar box becomes one.
       destination.kind = 'fpb';
+      destination.createdByDirection ??= direction;
     } else if (route.tc && destination.kind !== 'tc') {
       // The same coordinate requested as a TC point upgrades it to a TC, keeping
       // its alphabetical letter for later reuse.
       destination.kind = 'tc';
       destination.tcRequested = true;
+      // A point that existed as an ordinary endpoint before it was asked to be a
+      // TC keeps the direction it was first reached from, so the triangle faces
+      // the cable that actually arrives at it.
+      destination.createdByDirection ??= direction;
     }
 
     // Only the route's SOURCE becomes reused. A destination is labelled when it
@@ -369,16 +381,23 @@ export function buildNetwork(routes, options = {}) {
         node.fpbId = endpoint.id;
         node.fpbName = 'FPB';
       }
+      // The Origin has no route arriving at it, so its symbol has no incoming
+      // direction to face. It is given a deterministic default below.
+      node.markerDirection = null;
     } else if (endpoint.kind === 'fpb') {
       // A feeder pillar box is identified by its box, not by a letter.
       displayName = fpbEndpoints.length > 1 ? endpoint.name : 'FPB';
       node.fpbId = endpoint.id;
       node.fpbName = displayName;
+      node.markerDirection = endpoint.createdByDirection ?? null;
       endpoint.displayName = displayName;
     } else if (endpoint.kind === 'tc') {
       displayName = tcEndpoints.length > 1 ? endpoint.name : 'TC';
       node.tcId = endpoint.id;
       node.tcName = displayName;
+      // Which side of the point the cable arrives from. The triangle is turned
+      // so its base faces the cable leaving, and its apex the cable arriving.
+      node.markerDirection = endpoint.createdByDirection ?? null;
       endpoint.displayName = displayName;
     } else {
       // Every ordinary endpoint is labelled as soon as it is created, so a new

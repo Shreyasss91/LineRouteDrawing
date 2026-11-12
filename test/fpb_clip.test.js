@@ -13,7 +13,11 @@ import test from 'node:test';
 
 import { buildNetwork } from '../src/geometry/network.js';
 import { buildScene } from '../src/geometry/scene.js';
-import { clipSegmentOutsidePolygon, fpbRectVertices } from '../src/geometry/markers.js';
+import {
+  clipSegmentOutsidePolygon,
+  fpbRectVertices,
+  tcTriangleVertices,
+} from '../src/geometry/markers.js';
 import { createConfig } from '../src/config.js';
 
 /** Tolerance for comparing coordinates that pass through pixel rounding. */
@@ -317,13 +321,19 @@ test('10. TC clipping is unchanged by the FPB work', () => {
   assert.equal(scene.fpb.length, 0);
 
   const triangle = scene.tc[0];
-  const apex = triangle.y + triangle.halfWidth * 0.35;
-  const base = apex + triangle.height;
+  // Read the outline from the same function the renderers draw, so the test
+  // cannot describe a shape different from the one on the sheet.
+  const vertices = tcTriangleVertices(triangle);
+  const apex = vertices[0].y;
   const EDGE = 1e-3;
   const insideTriangle = (x, y) => {
-    const yn = (y - apex) / triangle.height;
-    if (yn <= EDGE || yn >= 1 - EDGE) return false;
-    return Math.abs(x - triangle.x) < triangle.halfWidth * (1 - yn) - EDGE;
+    // Strict interior: a point on an edge is a boundary point, not an intruder.
+    const sign = (p, q, r) => (p.x - r.x) * (q.y - r.y) - (q.x - r.x) * (p.y - r.y);
+    const [a, b, c] = vertices;
+    const d1 = sign({ x, y }, a, b);
+    const d2 = sign({ x, y }, b, c);
+    const d3 = sign({ x, y }, c, a);
+    return d1 > EDGE && d2 > EDGE && d3 > EDGE;
   };
 
   for (const point of sampleScene(scene, 80)) {

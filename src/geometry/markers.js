@@ -9,25 +9,97 @@
 
 /**
  * Vertical inset of the TC triangle's apex, as a fraction of its half-width.
+ *
  * Keeping the apex slightly above the anchor centres the triangle's visual mass
  * on the point rather than pushing the shape down the line.
+ *
+ * NOTE: with the base-midpoint anchoring convention this inset is no longer used
+ * to place the anchor. It is kept because the polar construction below reduces
+ * to the same shape at the same size, and removing it would silently resize
+ * every existing drawing. See `tcTriangleVertices`.
  */
 export const TC_APEX_INSET = 0.35;
 
 /**
+ * The direction a marker faces when it has no route attached to it.
+ *
+ * The Origin can be declared a TC point, and the Origin has no cable arriving at
+ * it. Rather than leave the triangle at whatever rotation happens to come out,
+ * it is given one fixed default so the same drawing always looks the same. South
+ * is chosen because it is the direction the example and the documentation use
+ * first, and because it puts the apex at the top of the sheet, where a reader
+ * starts reading.
+ */
+export const DEFAULT_MARKER_DIRECTION = 'south';
+
+/**
+ * Unit vector, in pixel space, for a canonical route direction.
+ *
+ * Grid coordinates run North = +Y, but pixels run the other way: screen Y grows
+ * downward. A marker is drawn in pixels, so the sign of the Y axis is flipped
+ * here rather than at every call site.
+ *
+ * @param {string|null|undefined} direction Canonical direction key.
+ * @returns {{dx: number, dy: number}} Unit vector in pixel space.
+ */
+export function pixelDirectionVector(direction) {
+  switch (direction) {
+    case 'north':
+      return { dx: 0, dy: -1 };
+    case 'south':
+      return { dx: 0, dy: 1 };
+    case 'east':
+      return { dx: 1, dy: 0 };
+    case 'west':
+      return { dx: -1, dy: 0 };
+    default:
+      return { dx: 0, dy: 1 };
+  }
+}
+
+/**
  * Outline of a TC triangle, in pixel space, as three points.
  *
- * @param {{x: number, y: number, halfWidth: number, height: number}} tc TC primitive.
- * @returns {{x: number, y: number}[]} Apex, bottom-right, bottom-left.
+ * ANCHORING CONVENTION
+ *
+ * The triangle's DOWNSTREAM BASE MIDPOINT is the TC node coordinate. The shape
+ * extends backwards, upstream, over the cable that feeds it, so it never reaches
+ * into the span that leaves the point.
+ *
+ * That single property is what keeps the drawing honest. A TC arrives on a route
+ * and continues on the next one, and both of those spans are drawn as one full
+ * configured span. If the marker occupied any of the outgoing span, the visible
+ * cable below the TC would be shorter than the distance the poles actually are
+ * apart, and a reader measuring the drawing would get the wrong answer. Placing
+ * the base at the node means the outgoing conductor starts exactly where the
+ * incoming one ended, and the next pole stays one whole span away.
+ *
+ * The shape is rotated so its apex points at the cable arriving. For a route laid
+ * South the cable comes from the North, so `direction` is `south`, `upstream` is
+ * `-direction` (North, pixel `{0, -1}`), the apex sits North of the anchor and
+ * the base is at the anchor.
+ *
+ * `halfWidth` is the half-width of the base and `height` the apex-to-base
+ * distance, both measured in the marker's own unrotated frame, so a triangle
+ * rotated East is exactly as large as one rotated South.
+ *
+ * @param {{x: number, y: number, halfWidth: number, height: number, direction?: string}} tc
+ *   TC primitive. `direction` is the route direction that created the point.
+ * @returns {{x: number, y: number}[]} Apex, base-right, base-left.
  */
 export function tcTriangleVertices(tc) {
   const { x, y, halfWidth, height } = tc;
-  const top = y + halfWidth * TC_APEX_INSET;
-  return [
-    { x, y: top },
-    { x: x + halfWidth, y: top + height },
-    { x: x - halfWidth, y: top + height },
-  ];
+  // Pixel-space unit vector pointing from the anchor towards the apex, i.e.
+  // upstream, back along the cable that arrives.
+  const forward = pixelDirectionVector(tc.direction ?? DEFAULT_MARKER_DIRECTION);
+  const upstream = { dx: -forward.dx, dy: -forward.dy };
+  // Perpendicular, for the two base corners.
+  const across = { dx: -upstream.dy, dy: upstream.dx };
+
+  const apex = { x: x + upstream.dx * height, y: y + upstream.dy * height };
+  const baseRight = { x: x + across.dx * halfWidth, y: y + across.dy * halfWidth };
+  const baseLeft = { x: x - across.dx * halfWidth, y: y - across.dy * halfWidth };
+  return [apex, baseRight, baseLeft];
 }
 
 /**

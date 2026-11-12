@@ -58,15 +58,22 @@ test('the example scene draws no line inside the TC triangle', () => {
   assert.equal(scene.tc.length, 1, 'the triangle is present');
 
   const anchor = scene.tc[0];
-  const apex = anchor.y + anchor.halfWidth * 0.35;
-  const base = apex + anchor.height;
+  // The shape under test is the one actually drawn, read from the same function
+  // the renderers use, so this cannot drift from the marker a reader sees.
+  const vertices = tcTriangleVertices(anchor);
   // The boundary belongs to the symbol: a trimmed line legitimately touches the
-  // apex and the base. Only the interior must stay empty.
+  // outline. Only the strictly interior region must stay empty.
   const EDGE = 1e-3;
   const inside = (x, y) => {
-    const yn = (y - apex) / anchor.height;
-    if (yn <= EDGE || yn >= 1 - EDGE) return false;
-    return Math.abs(x - anchor.x) < anchor.halfWidth * (1 - yn) - EDGE;
+    // Strict interior only. A point on an edge produces a zero for that edge and
+    // is therefore NOT inside: the boundary belongs to the symbol, and a trimmed
+    // line is expected to touch it.
+    const sign = (p, q, r) => (p.x - r.x) * (q.y - r.y) - (q.x - r.x) * (p.y - r.y);
+    const [a, b, c] = vertices;
+    const d1 = sign({ x, y }, a, b);
+    const d2 = sign({ x, y }, b, c);
+    const d3 = sign({ x, y }, c, a);
+    return d1 > EDGE && d2 > EDGE && d3 > EDGE;
   };
 
   for (const line of scene.lines) {
@@ -91,10 +98,16 @@ test('the line still visually meets the triangle it was trimmed against', () => 
   ]);
   const scene = buildScene(network, 'preview');
   const anchor = scene.tc[0];
-  const apex = anchor.y + anchor.halfWidth * 0.35;
+  // The triangle is anchored on its downstream base midpoint, so its apex sits
+  // one full height upstream of the node. On a route laid South that is above
+  // the node, which is where the arriving cable has to stop.
+  const vertices = tcTriangleVertices(anchor);
+  const apex = vertices[0];
 
   const touching = scene.lines.filter(
-    (line) => Math.abs(line.y1 - apex) < 1e-6 || Math.abs(line.y2 - apex) < 1e-6,
+    (line) =>
+      (Math.abs(line.x1 - apex.x) < 1e-6 && Math.abs(line.y1 - apex.y) < 1e-6) ||
+      (Math.abs(line.x2 - apex.x) < 1e-6 && Math.abs(line.y2 - apex.y) < 1e-6),
   );
   assert.ok(touching.length >= 1, 'a line ends exactly at the apex, so there is no gap');
 });
@@ -107,8 +120,10 @@ test('trimming applies to every profile that draws lines and triangles', () => {
   for (const profile of ['preview', 'svg', 'pdf', 'print']) {
     const scene = buildScene(network, profile);
     const anchor = scene.tc[0];
-    const apex = anchor.y + anchor.halfWidth * 0.35;
-    const base = apex + anchor.height;
+    // Apex upstream of the node, base exactly on it.
+    const vertices = tcTriangleVertices(anchor);
+    const apex = vertices[0].y;
+    const base = Math.max(vertices[1].y, vertices[2].y);
     const crossing = scene.lines.filter(
       (line) => Math.abs(line.x1 - anchor.x) < 1e-6 && Math.abs(line.x2 - anchor.x) < 1e-6
         && line.y1 < apex && line.y2 > base,

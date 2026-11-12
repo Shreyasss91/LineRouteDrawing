@@ -21,8 +21,10 @@ import { loadCalloutLines } from '../data/schedules.js';
 import { measureBlock } from './annotations.js';
 import { buildAnnotationLayer } from './annotation_layer.js';
 import {
+  DEFAULT_MARKER_DIRECTION,
   clipSegmentOutsidePolygon,
   fpbRectVertices,
+  pixelDirectionVector,
   tcTriangleVertices,
 } from './markers.js';
 
@@ -164,6 +166,41 @@ export function buildScene(network, profile = 'preview', configOverrides = {}, d
     (config.spanLength * config.tcMaxSpanFraction) / config.tcMarkerHeight,
   );
 
+  // The triangle is anchored on its base midpoint and extends backwards over the
+  // cable that feeds it, so the room it must fit into is the space between the TC
+  // node and the marker upstream of it. That space is at least one span, but a
+  // marker sitting immediately upstream - a feeder pillar box one span away is
+  // the tight case - leaves less than the full triangle height and would lose its
+  // visible cable. The triangle shrinks just enough to leave the minimum readable
+  // line, and is never enlarged. When there is no marker within a span, this
+  // leaves the configured size alone.
+  const upstreamReach = (node) => {
+    const forward = pixelDirectionVector(node.markerDirection ?? DEFAULT_MARKER_DIRECTION);
+    const upstream = { dx: -forward.dx, dy: -forward.dy };
+    const origin = toPixel(node);
+    let nearest = Infinity;
+    for (const other of nodes) {
+      if (other.key === node.key) continue;
+      const q = toPixel(other);
+      const dx = q.x - origin.x;
+      const dy = q.y - origin.y;
+      // Only markers actually upstream, along the axis the triangle points.
+      const along = dx * upstream.dx + dy * upstream.dy;
+      const across = Math.abs(dx * upstream.dy - dy * upstream.dx);
+      if (along <= 0 || across > config.markerClearance) continue;
+      // How far the upstream marker reaches back towards this node, measured on
+      // the same axis. A feeder pillar box reaches its own half-width; a pole or
+      // another TC reaches its symbol size.
+      let reach = config.poleMarkerSize;
+      if (other.fpbId) {
+        const box = createFpbPrimitive(other, q, config);
+        reach = Math.abs(upstream.dx) > 0.5 ? box.width / 2 : box.height / 2;
+      }
+      nearest = Math.min(nearest, along - reach);
+    }
+    return nearest;
+  };
+
   const lines = [];
   const poles = [];
   const tc = [];
@@ -179,13 +216,25 @@ export function buildScene(network, profile = 'preview', configOverrides = {}, d
     for (const node of nodes) {
       if (!node.tcId) continue;
       const p = toPixel(node);
+      // Fit the triangle into the space actually available behind the node, so an
+      // upstream marker keeps a readable piece of cable instead of losing it to
+      // the symbol. The cap can only make the triangle smaller.
+      const room = upstreamReach(node);
+      const fitScale = Number.isFinite(room)
+        ? Math.max(0, (room - config.minVisibleLineLength) / config.tcMarkerHeight)
+        : 1;
+      const scale = Math.min(tcScale, fitScale);
       const shape = {
         id: `tc:${node.key}`,
         x: p.x,
         y: p.y,
-        halfWidth: config.tcMarkerSize * tcScale,
-        height: config.tcMarkerHeight * tcScale,
+        halfWidth: config.tcMarkerSize * scale,
+        height: config.tcMarkerHeight * scale,
         name: node.tcName,
+        // The route direction that created this point, so the triangle can be
+        // turned to face the cable arriving at it. A point with no route (the
+        // Origin declared a TC) falls back to a fixed default.
+        direction: node.markerDirection ?? DEFAULT_MARKER_DIRECTION,
       };
       shape.vertices = tcTriangleVertices(shape);
       tcShapes.push(shape);

@@ -53,18 +53,34 @@ export function markerExtents(configOverrides = {}) {
   // The pole is a crossing whose arms reach poleMarkerSize in every direction.
   const pole = { halfWidth: config.poleMarkerSize, halfHeight: config.poleMarkerSize };
 
-  // The TC triangle hangs below its anchor: its apex sits a little above the
-  // anchor and its body extends `height` below that apex. Its two vertical
-  // reaches are therefore very different, and a neighbour below the triangle is
-  // pushed much further away than a neighbour above it. Collapsing them into one
-  // number would understate the room a triangle needs from the node below it.
-  const apexInset = config.tcMarkerSize * 0.35;
+  // The TC triangle is anchored on its downstream base midpoint, so the whole
+  // shape lies on ONE side of the anchor: behind it, over the cable that arrives.
+  // Its base is exactly on the node, so in the direction the route travels it
+  // reaches nothing at all beyond the node.
+  //
+  // A triangle points along the route, so its reach towards the cable that feeds
+  // it is the full HEIGHT, not the half-width: measured from the node, the apex
+  // is `height` away along the route axis whatever the route direction. The
+  // half-width is its lateral reach, which matters for a branch passing beside
+  // the point rather than through it.
+  //
+  // So `along` is what a neighbour on the same route must clear, and `halfWidth`
+  // is what a neighbour on a crossing route must clear. Both are recorded, and
+  // the pair formulas below take the larger of the two readings, so neither
+  // neighbour can be placed where the triangle actually reaches.
+  const tcHeight = config.tcMarkerHeight;
   const tc = {
+    // Lateral reach: the triangle's half-width.
     halfWidth: config.tcMarkerSize,
-    // Kept for callers that only need the largest extent in any direction.
-    halfHeight: Math.max(apexInset, apexInset + config.tcMarkerHeight),
-    up: apexInset,
-    down: apexInset + config.tcMarkerHeight,
+    // Reach along the route, towards the apex. Kept as the largest extent in any
+    // direction for callers that want a single number.
+    halfHeight: tcHeight,
+    // Towards the apex, which is where the cable arrives from.
+    up: tcHeight,
+    // Towards the base, which is on the node: no reach past it.
+    down: 0,
+    // The direction the shape points, used to pick the axis to measure on.
+    pointsAlongRoute: true,
   };
 
   // The FPB box is centred on its anchor and sized from its own label, using the
@@ -100,7 +116,15 @@ export function markerExtents(configOverrides = {}) {
  * @returns {number} The smallest workable centre-to-centre distance.
  */
 export function requiredDistanceBetween(a, b, axis, extents, clearance) {
-  const reach = (kind) => (axis === 'x' ? extents[kind].halfWidth : extents[kind].halfHeight);
+  // A TC triangle points along the route, so on either axis it can reach the full
+  // height (when it faces that axis) as well as its half-width (when the route
+  // runs across it). A neighbour may approach from either, so the larger of the
+  // two is the distance that must hold, and the same bound is used on both axes.
+  const reach = (kind) => {
+    const extent = extents[kind];
+    if (extent.pointsAlongRoute) return Math.max(extent.halfWidth, extent.halfHeight);
+    return axis === 'x' ? extent.halfWidth : extent.halfHeight;
+  };
   return reach(a) + reach(b) + clearance;
 }
 
@@ -129,13 +153,20 @@ export function requiredSpanLength(configOverrides = {}) {
   let required = 0;
   for (const a of MARKER_KINDS) {
     for (const b of MARKER_KINDS) {
-      // Horizontal: both markers are symmetric left and right.
-      const horizontal =
-        extents[a].halfWidth + extents[b].halfWidth + config.minVisibleLineLength;
-      // Vertical: `a` is the marker above, so it reaches down with its lower
-      // extent, and `b` is below, so it reaches up with its upper extent.
-      const vertical = extents[a].down + extents[b].up + config.minVisibleLineLength;
-      required = Math.max(required, horizontal, vertical);
+      // The TC triangle is the one marker whose size is not fixed: the scene fits
+      // it into the room actually available behind its node, shrinking it when a
+      // marker sits immediately upstream so that a readable piece of cable always
+      // remains. That means the full triangle height is NOT a floor here, and
+      // requiring it would reject spacing that the scene draws perfectly well.
+      //
+      // So the readable-line limit is measured with each marker's lateral reach on
+      // both axes: that is the size no marker can shrink below, and the scene's
+      // fitting rule guarantees the rest. The symbols-overlapping limit, which
+      // does use the full sizes, is `requiredClearanceDistance`.
+      const lateral = (kind) => extents[kind].halfWidth;
+      const sideBySide = lateral(a) + lateral(b) + config.minVisibleLineLength;
+      const stacked = lateral(a) + lateral(b) + config.minVisibleLineLength;
+      required = Math.max(required, sideBySide, stacked);
     }
   }
 
