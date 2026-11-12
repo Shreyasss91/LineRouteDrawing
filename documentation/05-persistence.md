@@ -136,7 +136,10 @@ id is a refusal (`BAD_LAYOUT`), not a silent fallback.
 
 - `value` is written as a number, so `12.5` stays `12.5`.
 - A `nodeId` the drawing no longer has is **kept and warned about**, not refused.
-- A TC point is not load-eligible; see
+- A TC point is not load-eligible (`isLoadEligible('tc') === false`), so the UI pickers
+  and the CSV/TSV export never offer or list one. This is a **UI and predicate** gate, not
+  a parser gate: a project file that names a TC point in `loads[].nodeId` is accepted
+  (recorded as [findings F10](findings.md#f10-a-load-on-a-tc-point-is-not-refused-by-the-model-or-the-parser)).
   [Identity and network data](06-identity-and-data.md#5-loads).
 
 ### `project.spanLengths` — measured lengths

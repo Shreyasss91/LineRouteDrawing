@@ -78,7 +78,7 @@ their test counts:
 | `replacement.test.js` | 15 | Editing and deleting rows; later rows kept and marked invalid |
 | `route_identity.test.js` | 11 | Route ids, stability of mid/dst ids across edits, no stealing |
 | `schedule_io.test.js` | 31 | CSV/TSV parse and format, delimiter detection, staged plans, replace vs update, refusal codes |
-| `schedules.test.js` | 26 | Load and length validation, units, no totals, TC not load-eligible, default-length utility |
+| `schedules.test.js` | 26 | Load and length validation, units, no totals, `isLoadEligible()` (TC excluded), default-length utility |
 | `storage.test.js` | 12 | `none`/`ok`/`invalid`/`unavailable`, quota handling, the versioned key |
 | `tc_anchor.test.js` | 12 | Base-midpoint anchoring, full leaving span, adaptive shrink only, per-direction apex |
 | `tc_clip.test.js` | 7 | Clipping against the triangle: miss, wholly inside, splitting, contact |

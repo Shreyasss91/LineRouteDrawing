@@ -452,8 +452,11 @@ The detailed list, with what has and has not been validated, is in
   off-canvas. Load callouts and span lengths are content, not labels, and are kept,
   subject to the two export switches. The measurement-completeness notice is a
   working aid and is never exported.
-- A load cannot be attached to a TC point; the model refuses it rather than drawing
-  a number next to a symbol that has nowhere to put a load.
+- A load cannot be attached to a TC point *through the interface*: the point pickers and
+  the CSV/TSV export filter on `isLoadEligible()`, so a TC point is never offered or
+  listed. This is a UI and predicate gate rather than a hard model rule — a hand-edited
+  project file naming a TC point in a load is accepted. See
+  [documentation/findings.md](documentation/findings.md) F10.
 - Moving a load to a different point, or resolving an unresolved record, is done from
   the schedule rather than by dragging. Dragging a callout or a span label nudges the
   annotation, not the load: the record stays on its pole.

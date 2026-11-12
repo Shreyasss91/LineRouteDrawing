@@ -17,6 +17,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F7](#f7-route-entry-has-no-undo-and-no-row-reordering) | Data safety | Medium | Open — by design |
 | [F8](#f8-appjs-is-a-1590-line-controller) | Maintainability | Low | Open |
 | [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | Open |
+| [F10](#f10-a-load-on-a-tc-point-is-not-refused-by-the-model-or-the-parser) | Eligibility not enforced at the boundary | Low–Medium | Open — documented, not changed |
 
 ---
 
@@ -156,6 +157,41 @@ against obstacles, which is the most likely superlinear cost.
 
 **Suggested fix.** Add a scripted large-drawing timing check before claiming any scale
 limit.
+
+## F10 — A load on a TC point is not refused by the model or the parser
+
+**Observed.** A TC point is documented as not load-eligible, and
+`isLoadEligible('tc') === false` is asserted by `test/schedules.test.js` test 15 and
+`test/annotations.test.js` test 27. But eligibility is enforced only by the
+**predicate** and by the point pickers / CSV export in `network_panel.js`. Neither
+`addLoad()` nor the project parser checks it. Verified directly:
+
+- `addLoad([], {nodeId: 'dst:route-1' /* a TC */, value: 10, unit: 'kVA'}, registry)`
+  → `{ok: true}` with the record created.
+- A project document with `routes: [{..., tc: true, fpb: false}]` and
+  `loads: [{nodeId: 'dst:route-1', ...}]` → `parseProjectJson` returns **`ok: true`**
+  and keeps the load.
+
+**Impact.** Low for normal use — the dropdown offers only eligible points, so the UI
+cannot produce this state. It matters because the project file is the more permissive
+interface (see [Known limitations §10](10-limitations.md#10-form-and-model-disagree-in-two-places)):
+a hand-edited or externally generated file can place a number on a TC triangle, and the
+annotation layer will draw that callout (its own comment notes it "can place one if a
+file somehow contains it").
+
+**Aggravating detail.** The title of `test/annotations.test.js` test 27 reads *"a load on
+a TC point is refused by the data model, not placed anyway"*, but its body asserts only
+`isLoadEligible(...) === false`. The test proves the predicate, not a refusal, so it does
+not cover the behaviour its name claims.
+
+**Why it was not changed.** Making `addLoad()` or the parser reject a TC load is a
+behaviour change (it would make some previously-openable files unopenable) and would need
+a new refusal code plus a test. Out of scope for a documentation task.
+
+**Suggested fix.** Either apply `isLoadEligible()` in `validateMeasuredData()` — refusing
+with a new `INELIGIBLE_LOAD_TARGET` code — or explicitly document that the file format
+allows it. Either way, rename or strengthen `annotations.test.js` test 27 so its name
+matches what it asserts.
 
 ---
 

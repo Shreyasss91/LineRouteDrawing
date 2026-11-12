@@ -82,7 +82,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Default unit kVA | Verified | `schedules.test.js` | — |
 | One callout per pole with one line per record | Verified | `browser` "one callout shows all three loads, unsummed", `annotations.test.js` | — |
 | Loads never summed, never converted | Verified | `schedules.test.js` | **By design**; see `10-limitations.md` §4 |
-| TC not load-eligible | Verified | `schedules.test.js` test 15, `annotations.test.js` test 27, model + UI | — |
+| TC not load-eligible | Verified (**predicate only**) | `schedules.test.js` test 15 and `annotations.test.js` test 27 both assert `isLoadEligible('tc') === false`; the UI pickers filter by it | **Not enforced by `addLoad()` or the project parser** — a hand-edited file can carry a load on a TC point and is accepted. See [findings F10](findings.md#f10-a-load-on-a-tc-point-is-not-refused-by-the-model-or-the-parser) |
 | Value must be `> 0` (zero refused) | Verified | `schedules.test.js` | Blank means "no load" |
 | Editing a load's value in place | Verified | `network_panel.js`, `schedules.test.js` | — |
 | Reassign an unresolved load | Verified | `schedules.test.js`, `reconcile.test.js` | Keeps id and value |
