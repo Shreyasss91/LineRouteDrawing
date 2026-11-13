@@ -136,9 +136,9 @@ not been demonstrated.
 
 ### Verified automatically
 
-- The whole domain layer: **502 Node tests across 31 files**, all passing on the
+- The whole domain layer: **516 Node tests across 32 files**, all passing on the
   current working tree.
-- The application in a real browser: **335 checks in 16 sections**, all passing,
+- The application in a real browser: **340 checks in 17 sections**, all passing,
   including one-page print fit for **all four layouts** and the TC geometry on the
   printed sheet.
 

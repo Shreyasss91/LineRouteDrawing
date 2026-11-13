@@ -286,6 +286,44 @@ Validation runs top-down. The first failing *stage* refuses the file, but within
 stage every problem is collected, so a message can name all the faulty routes at once.
 Nothing is returned half-applied.
 
+### Unknown fields are refused, in version order
+
+Every fixed-shape object has an enumerated list of accepted fields, and anything else is
+`UNKNOWN_PROJECT_FIELD`. Silently ignoring it is how a project loses data: a typo
+(`spanns`), a rename, or a value written by a branch that was never merged would simply
+vanish on the next save, with nothing reported and no copy left.
+
+| Object | Accepted fields |
+| --- | --- |
+| document | `format`, `schemaVersion`, `metadata`, `project` (versions 1-2 instead carry `savedAt` directly) |
+| `metadata` | `savedAt` |
+| `project` (v1) | `routes`, `originMarker`, `spanLength`, `layout` |
+| `project` (v2) | + `loads`, `spanLengths`, `loadPlacements`, `spanPlacements` |
+| `project` (v3) | + `nodeDesignations`, `exportLoads`, `exportLengths` |
+| `routes[]` | `id`, `from`, `direction`, `spans`, `tc`, `fpb` |
+| `loads[]` | `id`, `nodeId`, `value`, `unit` |
+| placement offsets | `dx`, `dy`, `candidateIndex` |
+
+**Two things are not fixed shape and are therefore not checked for their keys.**
+`spanLengths`, `loadPlacements`, `spanPlacements` and `nodeDesignations` are maps keyed by
+asset id: the key *is* the data, so every key is accepted — including one this drawing does
+not have, which is exactly the orphan case reconciliation exists for. Only the shape of each
+**value** is checked. `metadata` is checked, but its absence is not an error.
+
+**The check is version-aware, and runs in this order:**
+
+1. read the schema version (a future version is refused before anything else, so an
+   unreadable file is never reported as a field problem);
+2. validate the envelope and `project` against **that version's** field contract;
+3. migrate;
+4. validate the migrated payload against the **current** contract;
+5. run the semantic validation above.
+
+Judging every file against today's contract would refuse real version 1 files for lacking
+fields that did not exist yet; judging only the payload after migration would let a
+migration introduce a field this build does not define without anyone noticing. Both
+directions are covered by a test.
+
 | Code | Stage | Cause |
 | --- | --- | --- |
 | `EMPTY_FILE` | text | empty or whitespace-only |
@@ -295,6 +333,7 @@ Nothing is returned half-applied.
 | `BAD_VERSION` | envelope | `schemaVersion` is not an integer ≥ 1 |
 | `FUTURE_VERSION` | envelope | `> PROJECT_SCHEMA_VERSION` (3) |
 | `UNSUPPORTED_VERSION` | envelope | a supported-looking version this build no longer reads |
+| `UNKNOWN_PROJECT_FIELD` | envelope / payload / nested | a field name the file's schema version does not define. The message carries the exact JSON path (`document.project.somethingNew`, `document.project.routes[0].spanns`, `document.project.loadPlacements["dst:route-1"].scale`) and the names accepted there. Nothing is stripped |
 | `MISSING_PROJECT` | payload | `project` absent or not an object |
 | `MISSING_ROUTES` | payload | `routes` absent or not an array |
 | `BAD_ORIGIN_MARKER` | settings | not in `VALID_ORIGIN_MARKERS` (`plain`/`tc`/`fpb`) |

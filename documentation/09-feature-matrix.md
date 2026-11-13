@@ -37,6 +37,8 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Deleting a route leaves later identities stable | Verified | `route_identity.test.js` test 7, test 8 ("deleting a route leaves every other identity stable") | Deleting the **route** is the tested unit; deleting a row via the UI button is the same `state.routes.splice` path |
 | Deleting a branch leaves its records unresolved, not reassigned | Verified | `reconcile.test.js` tests 1, 4, 6, 7 | — |
 | Invalid rows are never dropped | Verified | `geometry.test.js` (forward reference and broken chain), `reconcile.test.js` test 7 | — |
+| Unknown project fields refused | Verified | `schema_fields.test.js` (14), `browser` §16 | `UNKNOWN_PROJECT_FIELD` carries the exact JSON path and the accepted names there; checked per schema version, before and after migration; dynamic asset-id maps keep every key. **Closed F5** |
+| Unreadable project preserved, autosave paused | Verified | `schema_fields.test.js` test 14, `browser` §16 | The stored text is returned as `raw` and left in storage byte-identical |
 | Route span cap 500 | Verified | `constraints.test.js` tests 2-4, `browser` §15 | **Interactive only.** The engine and the file format accept any positive integer; a longer route opens unchanged and is editable, with its count grandfathered (`src/data/constraints.js`). **Closed F1** |
 | Load / clear the example | Verified | `browser`, `integration.test.js` | — |
 
@@ -190,7 +192,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | Runs fully offline from the local filesystem | Verified | No network requests in the source; jsPDF vendored | `file://` disables the clipboard fallback path |
 | Works from `npm run serve` | Verified | `scripts/serve.js`, used by `test-browser.mjs` | — |
-| Chromium (via Playwright) | Verified | 335 browser checks | — |
+| Chromium (via Playwright) | Verified | 340 browser checks | — |
 | Chrome, manually | Verified (manual) | Print-dialog validation | — |
 | Firefox | **Incomplete validation** | Nothing browser-specific in the source | Never run |
 | Safari / iOS | **Incomplete validation** | Nothing browser-specific | Never run |

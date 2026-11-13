@@ -17,6 +17,50 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Fixed
 
+- **Unknown fields in a project file were ignored silently (finding F5).** A document with
+  `project.somethingNew = 123` parsed `ok: true` with no warning. The obvious reading -
+  "forward compatible, and a newer *version* is refused by `FUTURE_VERSION` anyway" -
+  misses the case that actually loses data: a field this build writes correctly but a typo
+  mangles. `{"spanns": 4}` is not a newer-version field; it is a route with no span count,
+  and the old reader reported "Route 1 has a span count that is not a whole number of at
+  least 1" while discarding `spanns`. The same happens to a renamed field, a hand-edited
+  value, or anything another branch wrote: it vanishes on the next save, with no copy left
+  and nothing reported.
+
+  Every fixed-shape object now has an enumerated list of accepted fields, and anything else
+  is refused with the stable code `UNKNOWN_PROJECT_FIELD`, carrying the exact JSON path and
+  the names accepted there:
+
+  ```
+  document.project.somethingNew
+  document.project.routes[0].spanns
+  document.project.loads[0].amps
+  document.project.loadPlacements["dst:route-1"].scale
+  document.metadata.buildNumber
+  ```
+
+  **Not treated as fixed shape.** `spanLengths`, `loadPlacements`, `spanPlacements` and
+  `nodeDesignations` are maps keyed by asset id. The key IS the data, so every key is
+  accepted - including an id this drawing does not have, which is the orphan case
+  reconciliation exists for. Only the shape of each value is checked. No extension
+  namespace was invented: there is nowhere to put an undefined field.
+
+  **Version-aware order.** The check cannot simply run on the payload. The schema version is
+  read first, so an unreadable version is never reported as a field problem; the envelope
+  and project are then judged against THAT FILE'S OWN version contract; the document is
+  migrated; the migrated payload is judged against the current contract; and only then does
+  semantic validation run. Judging every file against today's contract would refuse real
+  version 1 files for lacking fields that did not exist yet - and version 1 files carry
+  `savedAt` on the envelope and `layout` despite the version table crediting it to v2, so
+  both are accepted where they were actually written. Step four guards the other direction,
+  so a migration cannot introduce a name this build does not define without being noticed.
+
+  **Recovery is unchanged in spirit.** A refusal is all-or-nothing: no project is returned,
+  the caller's document is not mutated, and the stored text is neither stripped nor
+  replaced. `loadFromStorage()` still returns `{status: 'invalid', message, raw}`, so the
+  recovery bar appears, autosaving stays paused, and the original text stays byte-identical
+  in storage.
+
 - **The form and the project parser disagreed on two limits, and nothing said which was
   the policy (finding F1).** The form refused a 501st span while the parser accepted it,
   and the form clamped spacing to 12-120 px while the parser accepted 8 px. The numbers
@@ -145,6 +189,18 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Added
 
+- `test/schema_fields.test.js` - 14 tests, Node suite 502 -> 516 in 32 files: the original
+  `project.somethingNew` reproduction; unknown envelope, `metadata`, route (`spanns`), load
+  and placement fields with their exact paths; the dynamic maps accepting canonical ids,
+  coordinate spellings and ids this drawing does not have; a historical v1 and v2 document
+  opening under its own contract while a v1 file carrying a v3 field is refused; a future
+  version still refused for the version reason; all-or-nothing; the serializer's own output
+  accepted at all three versions; and the storage layer preserving the unreadable text.
+- Browser §16 "Unknown project fields are refused, not trimmed" (5 checks), suite 335 ->
+  340 in 17 sections: an unknown field stops the project opening, the recovery bar names
+  `document.project.somethingNew`, the seeded route is not applied to the drawing, the
+  stored text is byte-identical afterwards, and the same project without that field opens
+  normally.
 - `test/constraints.test.js` - 17 tests, Node suite 485 -> 502 in 31 files. The limit
   values; 500 accepted and 501 refused; a grandfathered 648 kept, 649 refused, a new 648
   refused and 648 -> 500 ordinary again; clamping at the floor, the ceiling, rounding and
@@ -201,6 +257,12 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Verification
 
+- **The unknown-field policy is proved by mutation, in both directions.** Making
+  `findUnknownField()` always return `null` fails 6 of the 14 tests, including the original
+  reproduction and the storage-preservation check. Judging every document against the
+  current contract instead of its own version fails 3 tests in the new file and 3 elsewhere,
+  because real v1 and v2 projects stop opening. `src/ui/project.js` was restored
+  byte-for-byte (`cmp` clean) and the suites re-run green.
 - **The limits fix is proved by mutation, in both directions.** Removing the grandfathering
   (`if (overLimit)` instead of `if (overLimit && spans !== existingSpans)`) fails Node test
   4 and the browser check *the saved project keeps the grandfathered span count*. Clamping
@@ -212,8 +274,8 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
   hit`, `the covered label is still grabbable`, `dragging a label under the notice records
   a manual offset` and `the covered label follows the pointer`; `src/render/svg.js` was
   restored byte-for-byte afterwards (`cmp` clean) and the suite re-run green.
-- Full runs in this state: `npm test` **502/502 Node tests in 31 files**;
-  `npm run test:browser` **335/335 checks in 16 sections**; documentation links 322 in 15
+- Full runs in this state: `npm test` **516/516 Node tests in 32 files**;
+  `npm run test:browser` **340/340 checks in 17 sections**; documentation links 324 in 15
   files with 0 problems; code fences balanced.
 - Deliberate behaviour recorded rather than changed: the preview also draws `#hit-areas`
   last with `pointer-events: all`, because pressing a pole selects it. A label dragged on

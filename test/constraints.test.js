@@ -249,9 +249,22 @@ test('17. an older document keeps out-of-range values through every migration st
   // The migrations add measured data and point names; they must not be the place where a
   // limit is quietly applied.
   const v1 = JSON.parse(jsonOf(projectWithSpans(MAX_ROUTE_SPANS + 7, 6)));
+  // Reshape it into a real version 1 document: the save time lived on the envelope then,
+  // and none of the measured data or point names existed yet.
   v1.schemaVersion = 1;
-  delete v1.project.loads;
-  delete v1.project.spanLengths;
+  v1.savedAt = v1.metadata.savedAt;
+  delete v1.metadata;
+  for (const field of [
+    'loads',
+    'spanLengths',
+    'loadPlacements',
+    'spanPlacements',
+    'nodeDesignations',
+    'exportLoads',
+    'exportLengths',
+  ]) {
+    delete v1.project[field];
+  }
   const parsed = parseProjectJson(JSON.stringify(v1));
   assert.equal(parsed.ok, true);
   assert.equal(parsed.project.routes[0].spans, MAX_ROUTE_SPANS + 7);

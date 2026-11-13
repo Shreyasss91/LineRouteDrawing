@@ -3041,6 +3041,125 @@ try {
     JSON.stringify({ route: plainState.route, spacing: plainState.spacing }),
   );
 
+  section('Unknown project fields are refused, not trimmed');
+
+  // A field the build does not recognise used to be ignored silently, which is how a
+  // typo, a rename or an unmerged branch's data disappears on the next save with nothing
+  // reported. It is now a refusal that names the exact path, and - because the stored copy
+  // is the user's only one - the refusal must leave it untouched and pause autosaving.
+  const unknownFieldDoc = await page.evaluate(async () => {
+    const { serializeProjectJson } = await import('./src/ui/project.js');
+    const doc = JSON.parse(
+      serializeProjectJson(
+        {
+          routes: [
+            { id: 'route-1', from: 'origin', direction: 'south', spans: 211, tc: false, fpb: false },
+          ],
+          originMarker: 'plain',
+          spanLength: 40,
+          layout: 'a4_landscape',
+          loads: [],
+          spanLengths: {},
+          loadPlacements: {},
+          spanPlacements: {},
+          nodeDesignations: {},
+        },
+        { savedAt: new Date('2026-01-01T00:00:00Z') },
+      ),
+    );
+    doc.project.somethingNew = 123;
+    return JSON.stringify(doc, null, 2);
+  });
+
+  await page.evaluate((doc) => {
+    localStorage.clear();
+    localStorage.setItem('line-route-drawing:v3:project', doc);
+  }, unknownFieldDoc);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg', { timeout: 20000 });
+  await page.waitForTimeout(500);
+
+  const refusedState = await page.evaluate(() => {
+    const bar = document.querySelector('#recovery-bar');
+    return {
+      barShown: Boolean(bar) && !bar.hidden,
+      text: bar && !bar.hidden ? bar.innerText.trim() : null,
+      stored: (() => {
+        for (let i = 0; i < localStorage.length; i += 1) {
+          const key = localStorage.key(i);
+          if (key && key.includes('line-route')) return localStorage.getItem(key);
+        }
+        return null;
+      })(),
+      rowSpans: [...document.querySelectorAll('#route-rows tr')].map((tr) =>
+        tr.querySelector('td:nth-child(4)')?.textContent?.trim(),
+      ),
+    };
+  });
+
+  check(
+    'an unknown field stops the project opening',
+    refusedState.barShown === true,
+    JSON.stringify(refusedState.barShown),
+  );
+  check(
+    'the refusal names the exact field path',
+    /document\.project\.somethingNew/.test(refusedState.text ?? ''),
+    String(refusedState.text).slice(0, 200),
+  );
+  check(
+    'the unreadable project is not applied to the drawing',
+    !refusedState.rowSpans.includes('211'),
+    JSON.stringify(refusedState.rowSpans),
+  );
+  check(
+    'the stored text is left exactly as it was',
+    refusedState.stored === unknownFieldDoc,
+    `${unknownFieldDoc.length} -> ${String(refusedState.stored).length} chars`,
+  );
+
+  // A readable project must not be treated the same way: no bar, and the route is applied.
+  const knownFieldDoc = await page.evaluate(async () => {
+    const { serializeProjectJson } = await import('./src/ui/project.js');
+    return serializeProjectJson(
+      {
+        routes: [
+          { id: 'route-1', from: 'origin', direction: 'south', spans: 211, tc: false, fpb: false },
+        ],
+        originMarker: 'plain',
+        spanLength: 40,
+        layout: 'a4_landscape',
+        loads: [],
+        spanLengths: {},
+        loadPlacements: {},
+        spanPlacements: {},
+        nodeDesignations: {},
+      },
+      { savedAt: new Date('2026-01-01T00:00:00Z') },
+    );
+  });
+  await page.evaluate((doc) => {
+    localStorage.clear();
+    localStorage.setItem('line-route-drawing:v3:project', doc);
+  }, knownFieldDoc);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg', { timeout: 20000 });
+  await page.waitForTimeout(500);
+  const acceptedState = await page.evaluate(() => {
+    const bar = document.querySelector('#recovery-bar');
+    return {
+      barShown: Boolean(bar) && !bar.hidden,
+      rowSpans: [...document.querySelectorAll('#route-rows tr')].map((tr) =>
+        tr.querySelector('td:nth-child(4)')?.textContent?.trim(),
+      ),
+    };
+  });
+  check(
+    'the same project without the unknown field opens normally',
+    acceptedState.barShown === false && acceptedState.rowSpans.includes('211'),
+    JSON.stringify(acceptedState),
+  );
+
   section('Console');
 
   check('no uncaught errors reached the page', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));

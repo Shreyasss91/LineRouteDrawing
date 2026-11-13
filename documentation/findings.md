@@ -12,7 +12,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F2](#f2-an-edited-route-is-now-covered-by-a-browser-test) | Untested UI path | Medium | **Closed** — 32 browser checks exercise the edit form |
 | [F3](#f3-drag-at-zoom-is-verified-against-the-stored-scene-offset) | Untested UI behaviour | Low | **Closed** — drag verified at three zoom levels against the stored scene offset |
 | [F4](#f4-the-static-spacing-minimum-in-the-markup-is-stale) | Stale literal | Low | Open |
-| [F5](#f5-unknown-keys-in-a-project-file-are-ignored-silently) | Forward compatibility | Low | Open |
+| [F5](#f5-unknown-keys-in-a-project-file-were-ignored-silently) | Forward compatibility | Low | **Closed** — `UNKNOWN_PROJECT_FIELD` with the exact path; 14 Node + 5 browser checks |
 | [F6](#f6-the-completeness-notice-is-preview-only) | Export completeness | Low | Open — arguably by design |
 | [F7](#f7-route-entry-has-no-undo-and-no-row-reordering) | Data safety | Medium | Open — by design |
 | [F8](#f8-appjs-is-a-1590-line-controller) | Maintainability | Low | Open |
@@ -236,18 +236,80 @@ anyone reading the markup as the source of truth.
 **Suggested fix.** Remove the `min` attribute from the markup (it is always set
 programmatically), or set it to a value the code keeps in sync.
 
-## F5 — Unknown keys in a project file are ignored silently
+## F5 — Unknown keys in a project file were ignored silently
 
-**Observed.** A project document with an extra key (`project.somethingNew = 123`)
-parses `ok: true` with **no warning** (verified).
+**Status: closed.** An unrecognised field is now a refusal carrying the exact JSON path
+(`UNKNOWN_PROJECT_FIELD`), checked per schema version and only where the shape is fixed.
 
-**Impact.** Low for this build, and normal pass-through JSON behaviour. It becomes
-relevant only if a future version adds a field: a *newer* file opened by this build is
-already refused by `FUTURE_VERSION`, so silent key loss cannot happen across versions
-today.
+**Observed originally.** A project document with an extra key
+(`project.somethingNew = 123`) parsed `ok: true` with **no warning**.
 
-**Suggested decision.** Leave as is, or add a warning listing unrecognised keys. Worth
-a note because it is the difference between "forward compatible" and "refuses".
+**Why it mattered more than it looked.** The obvious reading - "this build is forward
+compatible, and a newer file is refused by `FUTURE_VERSION` anyway" - misses the case that
+actually loses data: a field that *this* build writes correctly but a typo mangles.
+`{"spanns": 4}` is not a newer-version field; it is a route with no span count, and the
+original reader reported "Route 1 has a span count that is not a whole number of at least 1."
+while silently discarding `spanns`. The same happens to a renamed field, a hand-edited
+value, or anything another branch wrote: it disappears on the next save, with no copy left
+and nothing reported. Ignoring unknown input is only safe if you can prove no unknown input
+is an error, and that cannot be proved for a file a person can edit.
+
+**Fix, and its boundaries.** Every fixed-shape object has an enumerated list of accepted
+fields (`src/ui/project.js`):
+
+| Object | Accepted |
+| --- | --- |
+| document | `format`, `schemaVersion`, `metadata`, `project` (v1-v2 instead carry `savedAt`) |
+| `metadata` | `savedAt` |
+| `project` v1 / v2 / v3 | routes + settings, then + the measured data, then + point names and the export switches |
+| `routes[]` | `id`, `from`, `direction`, `spans`, `tc`, `fpb` |
+| `loads[]` | `id`, `nodeId`, `value`, `unit` |
+| placement offsets | `dx`, `dy`, `candidateIndex` |
+
+**Deliberately not treated as fixed shape.** `spanLengths`, `loadPlacements`,
+`spanPlacements` and `nodeDesignations` are maps keyed by asset id. Their keys are data, so
+any key is accepted - including an id this drawing does not have, which is the orphan case
+reconciliation exists for. Only the shape of each value is checked. No extension namespace
+was invented: a field that is not defined is not accepted, and there is nowhere to put one.
+
+**Version-aware order.** The check cannot simply run "on the payload":
+
+1. the schema version is read first, and a future version is refused there - an unreadable
+   version must never be reported as a field problem;
+2. the envelope and `project` are judged against **that file's own version** contract;
+3. the document is migrated;
+4. the migrated payload is judged against the **current** contract;
+5. the semantic validation runs.
+
+Step 2 is what keeps a real version 1 file open: it lacks `loads`, `nodeDesignations` and
+`metadata`, and judging it against today's contract would refuse every one of them. Step 4
+guards the other direction, so a migration cannot introduce a name this build does not
+define without being noticed. `layout` is accepted in version 1 because such files carry it,
+even though the version table credits it to version 2 - refusing them over that would be
+the compatibility loss this whole policy avoids.
+
+**Recovery.** A refusal is all-or-nothing: no project is returned, the caller's document is
+not mutated, and the stored text is neither stripped nor replaced. `loadFromStorage()`
+returns `{status: 'invalid', message, raw}`, so the recovery bar appears, autosaving stays
+paused, and `raw` is handed back unchanged - verified in the browser as well as in Node.
+
+**Evidence.** `test/schema_fields.test.js` - 14 tests, Node suite 502 -> 516 in 32 files:
+the original `project.somethingNew` reproduction; unknown envelope, `metadata`, route
+(`spanns`), load and placement fields with their exact paths; the dynamic maps accepting
+canonical ids, coordinate spellings and ids this drawing does not have; a historical v1 and
+v2 document opening under its own contract while a v1 file carrying a v3 field is refused;
+a future version still refused for the version reason; all-or-nothing; the serializer's own
+output accepted at all three versions; and the storage layer preserving the unreadable text.
+
+Browser `§Unknown project fields are refused, not trimmed` - 5 checks: an unknown field
+stops the project opening, the bar names `document.project.somethingNew`, the seeded route
+is not applied, the stored text is byte-identical afterwards, and the same project without
+that field opens normally.
+
+**Mutations.** Making `findUnknownField()` always return `null` fails 6 of the 14 tests,
+including the original reproduction and the storage-preservation check. Judging every
+document against the current contract instead of its own version fails 3 tests in the new
+file and 3 elsewhere (real v1 and v2 projects stop opening). Both restored byte-for-byte.
 
 ## F6 — The completeness notice is preview-only
 

@@ -34,6 +34,106 @@ export const PROJECT_SCHEMA_VERSION = 3;
 /** Every schema version this build can read. */
 export const SUPPORTED_SCHEMA_VERSIONS = Object.freeze([1, 2, 3]);
 
+/**
+ * Every field name each fixed-shape object in the file may carry.
+ *
+ * The file format is read strictly: a field this build does not recognise is a
+ * refusal, not something to ignore. Ignoring it is how a project loses data
+ * quietly - a renamed field, a typo (`spanns`), or a value written by a branch
+ * that was never merged would simply vanish on the next save. Refusing names the
+ * exact path, so the mistake is visible and fixable.
+ *
+ * Two things are deliberately NOT listed here, because they are not fixed shape:
+ *
+ *   - `spanLengths`, `loadPlacements`, `spanPlacements` and `nodeDesignations` are
+ *     maps keyed by asset id. Their KEYS are data, not field names, so any key is
+ *     accepted; only the shape of their values is checked.
+ *   - `metadata` is an envelope object whose only defined member is `savedAt`.
+ *
+ * The project keys are given PER VERSION, because a field can be legitimate in
+ * the file's own version and unknown in another. A version 1 file is judged
+ * against version 1's contract, migrated, and then judged again against version
+ * 3's - so an old file is never refused for lacking fields that did not exist
+ * yet, and a current file is never accepted with fields that no longer do.
+ */
+const ENVELOPE_FIELDS = {
+  // Versions 1 and 2 recorded the save time directly on the document; version 3 moved
+  // it into a `metadata` block. Both shapes are accepted where they were actually
+  // written, and only there.
+  1: ['format', 'schemaVersion', 'savedAt', 'project'],
+  2: ['format', 'schemaVersion', 'savedAt', 'project'],
+  3: ['format', 'schemaVersion', 'metadata', 'project'],
+};
+const METADATA_FIELDS = ['savedAt'];
+const ROUTE_FIELDS = ['id', 'from', 'direction', 'spans', 'tc', 'fpb'];
+const LOAD_FIELDS = ['id', 'nodeId', 'value', 'unit'];
+const PLACEMENT_FIELDS = ['dx', 'dy', 'candidateIndex'];
+const PROJECT_FIELDS = {
+  // Version 1 held the routes and the drawing settings. `layout` is accepted here
+  // because version 1 files in the wild carry it: the layout predates the version
+  // that formally introduced it, and refusing those files over a bookkeeping detail
+  // would be exactly the compatibility loss this policy exists to avoid.
+  1: ['routes', 'originMarker', 'spanLength', 'layout'],
+  2: [
+    'routes',
+    'originMarker',
+    'spanLength',
+    'layout',
+    'loads',
+    'spanLengths',
+    'loadPlacements',
+    'spanPlacements',
+  ],
+  3: [
+    'routes',
+    'originMarker',
+    'spanLength',
+    'layout',
+    'loads',
+    'spanLengths',
+    'loadPlacements',
+    'spanPlacements',
+    'nodeDesignations',
+    'exportLoads',
+    'exportLengths',
+  ],
+};
+
+/**
+ * The first field in `object` that `allowed` does not list.
+ *
+ * @param {object} object Object to inspect.
+ * @param {string[]} allowed Accepted field names.
+ * @param {string} path JSON path of `object`, for the message.
+ * @returns {{path: string, field: string}|null} The first offender, or `null`.
+ */
+function findUnknownField(object, allowed, path) {
+  for (const field of Object.keys(object)) {
+    if (!allowed.includes(field)) return { path: `${path}.${field}`, field };
+  }
+  return null;
+}
+
+/**
+ * Refuse a document that carries an unrecognised field.
+ *
+ * Nothing is stripped and nothing is applied: the caller gets the path of the
+ * offending field and the list of names that are accepted there, and the file on
+ * disk is left exactly as it was.
+ *
+ * @param {{path: string, field: string}} found Offending field.
+ * @param {string[]} allowed Accepted names at that path.
+ * @returns {{ok: false, code: string, message: string}} Refusal.
+ */
+function failUnknownField(found, allowed) {
+  return fail(
+    'UNKNOWN_PROJECT_FIELD',
+    `That project file has a field this tool does not recognise: ${found.path}. ` +
+      'Nothing has been opened and your current drawing is unchanged. ' +
+      `Accepted there: ${allowed.join(', ')}.`,
+  );
+}
+
 /** The only marker kinds a route destination may carry. */
 const VALID_DIRECTIONS = new Set(Object.keys(DIRECTIONS));
 const VALID_ORIGIN_MARKERS = new Set(['plain', 'tc', 'fpb']);
@@ -283,6 +383,56 @@ function fail(code, message) {
 }
 
 /**
+ * The first unrecognised field inside one of the project's fixed-shape objects.
+ *
+ * Covers the three places a field name is fixed: a route, a load, and a placement
+ * offset. The surrounding maps are deliberately skipped - `spanLengths`,
+ * `nodeDesignations`, `loadPlacements` and `spanPlacements` are keyed by asset id, so
+ * every key is legitimate data. Their values are inspected; their names are not.
+ *
+ * @param {object} payload Migrated project payload.
+ * @returns {{found: {path: string, field: string}, allowed: string[]}|null} First offender.
+ */
+function findUnknownNestedField(payload) {
+  const containers = [
+    {
+      value: payload.routes,
+      allowed: ROUTE_FIELDS,
+      path: (key) => `document.project.routes[${key}]`,
+    },
+    {
+      value: payload.loads,
+      allowed: LOAD_FIELDS,
+      path: (key) => `document.project.loads[${key}]`,
+    },
+    {
+      value: payload.loadPlacements,
+      allowed: PLACEMENT_FIELDS,
+      // Keyed by asset id, so the key is quoted and shown as it is written.
+      path: (key) => `document.project.loadPlacements[${JSON.stringify(key)}]`,
+    },
+    {
+      value: payload.spanPlacements,
+      allowed: PLACEMENT_FIELDS,
+      path: (key) => `document.project.spanPlacements[${JSON.stringify(key)}]`,
+    },
+  ];
+
+  for (const { value, allowed, path } of containers) {
+    if (!value || typeof value !== 'object') continue;
+    for (const key of Object.keys(value)) {
+      const entry = value[key];
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      for (const field of Object.keys(entry)) {
+        if (allowed.includes(field)) continue;
+        return { found: { path: `${path(key)}.${field}`, field }, allowed };
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Read a project document back into a live project.
  *
  * Validation happens in full before anything is returned, so a caller can never
@@ -360,11 +510,54 @@ export function parseProjectDocument(document) {
     );
   }
 
+  // Read strictly, in the order the format is defined: envelope, then the field
+  // contract OF THIS FILE'S VERSION, then the migration, then the current contract
+  // again. Checking only after migrating would report a legitimate version 1 field as
+  // unknown; checking only before would let a migration introduce something this build
+  // does not define and never notice.
+  const envelopeFields = ENVELOPE_FIELDS[version];
+  const envelopeField = findUnknownField(document, envelopeFields, 'document');
+  if (envelopeField) return failUnknownField(envelopeField, envelopeFields);
+  if (document.metadata !== undefined) {
+    if (
+      !document.metadata ||
+      typeof document.metadata !== 'object' ||
+      Array.isArray(document.metadata)
+    ) {
+      return fail('BAD_METADATA', 'That project file has a metadata block that is not a block.');
+    }
+    const metadataField = findUnknownField(document.metadata, METADATA_FIELDS, 'document.metadata');
+    if (metadataField) return failUnknownField(metadataField, METADATA_FIELDS);
+  }
+  if (document.project && typeof document.project === 'object' && !Array.isArray(document.project)) {
+    const historicalField = findUnknownField(
+      document.project,
+      PROJECT_FIELDS[version],
+      'document.project',
+    );
+    if (historicalField) return failUnknownField(historicalField, PROJECT_FIELDS[version]);
+  }
+
   const migrated = migrateDocument(document);
   const payload = migrated.project;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return fail('MISSING_PROJECT', 'That project file has no drawing in it, so there is nothing to open.');
   }
+
+  // The current contract, after migration. A no-op for a file already at the current
+  // version, and a guard on the migrations themselves for an older one.
+  const migratedField = findUnknownField(
+    payload,
+    PROJECT_FIELDS[PROJECT_SCHEMA_VERSION],
+    'document.project',
+  );
+  if (migratedField) return failUnknownField(migratedField, PROJECT_FIELDS[PROJECT_SCHEMA_VERSION]);
+
+  // The fixed-shape objects INSIDE the project: each route, each load, and each stored
+  // placement offset. Maps keyed by asset id are not checked for their keys - the key is
+  // the asset id, which is data - but the shape of each value is.
+  const nested = findUnknownNestedField(payload);
+  if (nested) return failUnknownField(nested.found, nested.allowed);
 
   if (!Array.isArray(payload.routes)) {
     return fail(

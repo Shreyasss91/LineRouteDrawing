@@ -533,6 +533,13 @@ Buttons `#btn-save-project`, `#btn-load-project` (+ hidden `#field-project-file`
   contains only what you authored — routes with their ids, Origin symbol, spacing, page
   layout, loads, span lengths, annotation offsets, point designations and the two
   export switches. The drawing itself is **not** stored; it is rebuilt on load.
+- A file carrying a field this build does not recognise is **refused**, not quietly
+  trimmed: the message names the exact path (`document.project.somethingNew`) and the
+  fields accepted there. This is deliberate — an ignored field is a field that disappears
+  the next time you save
+  ([F5](findings.md#f5-unknown-keys-in-a-project-file-were-ignored-silently)). The saved
+  copy, if the file came from the browser's own storage, is left untouched and automatic
+  saving stays paused until you decide what to do with it.
 - **Load project** opens a file picker. Nothing is applied until the whole file has
   been validated and the routes rebuilt through the real engine.
 - **Confirmation** is asked only when opening the file would actually change what you
