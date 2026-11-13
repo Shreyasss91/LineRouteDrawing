@@ -101,10 +101,10 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Automatic callout and label placement | Verified | `annotations.test.js` (37 tests) | Candidate scoring, not global optimisation |
 | Collision avoidance | Verified | `annotations.test.js`, `collide.js` tests | Box/segment tests |
 | Leader line and arrowhead | Verified | `annotations.test.js` | — |
-| Drag to move an annotation | Verified | `browser` §6 "a callout can be dragged" | — |
-| Drag stored as an offset, follows its pole | Verified | `browser` §6 "the dragged position survives a reload" | — |
-| Drag scaled by zoom | **Incomplete validation** | Implemented in `app.js` ("Scene-space position at the moment the drag began, so zoom never bends the move"); no automated check | The browser suite drags only at fit zoom |
-| A click of no travel is not recorded | **Incomplete validation** | Implemented (a drag under half a pixel is discarded); no automated check | — |
+| Drag to move an annotation | Verified | `browser` §8 "a callout can be dragged", at fit zoom and at two other zooms | — |
+| Drag stored as an offset, follows its pole | Verified | `browser` §8 "the callout keeps its scene position across a reload" | Offset is a scene-space delta, so a re-layout carries the label with its pole |
+| Drag scaled by zoom | Verified | `browser` §8, three zooms: stored and drawn scene delta both equal `pointer ÷ zoom`, on-screen movement equals the pointer delta, and the two conversion factors differ by the ratio of the zooms (3.052 vs 3.052) | **Closed F3.** No production change was needed - the arithmetic was already correct; it was the coverage that was missing |
+| A click of no travel is not recorded | Verified | `browser` §8 "a click on a callout is not recorded as a drag" | A drag under half a pixel is discarded |
 | Annotations identical in preview and export | Verified | `annotation_layer.js` `labelSlots` + browser PDF/print sections | Same unpadded frame |
 
 ## 6. Persistence
@@ -187,7 +187,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | Runs fully offline from the local filesystem | Verified | No network requests in the source; jsPDF vendored | `file://` disables the clipboard fallback path |
 | Works from `npm run serve` | Verified | `scripts/serve.js`, used by `test-browser.mjs` | — |
-| Chromium (via Playwright) | Verified | 274 browser checks | — |
+| Chromium (via Playwright) | Verified | 298 browser checks | — |
 | Chrome, manually | Verified (manual) | Print-dialog validation | — |
 | Firefox | **Incomplete validation** | Nothing browser-specific in the source | Never run |
 | Safari / iOS | **Incomplete validation** | Nothing browser-specific | Never run |
@@ -198,12 +198,11 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 
 Collected from the tables above — these are the honest gaps:
 
-1. **Drag-at-zoom** is implemented but has no automated check.
-2. **A4 portrait and A3 landscape have never been printed from a real print dialog** —
+1. **A4 portrait and A3 landscape have never been printed from a real print dialog** —
    only the automated fit check and the Letter-landscape manual run exist.
-3. **Firefox and Safari have never been run.**
-4. **No touch device, no mobile layout, no keyboard-only run.**
-5. **No screen-reader path to the drawing.**
-6. **No performance baseline** for large drawings (hundreds of routes).
-7. **Physical printing was validated outside this repository** by the user, and is not
+2. **Firefox and Safari have never been run.**
+3. **No touch device, no mobile layout, no keyboard-only run.**
+4. **No screen-reader path to the drawing.**
+5. **No performance baseline** for large drawings (hundreds of routes).
+6. **Physical printing was validated outside this repository** by the user, and is not
    reproducible here.

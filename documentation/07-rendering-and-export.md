@@ -404,6 +404,18 @@ they are transparent and exist only to catch clicks.
 - Both are placed from **candidate positions** scored against obstacles
   (`collide.js`), then offset by any stored user drag. The stored offset is a delta,
   so the annotation follows its pole through a re-layout.
+- **The stored offset is in scene units, not screen pixels.** Dragging divides the
+  pointer's travel by `view.zoom` before adding it to the offset
+  (`scene delta = screen delta / zoom`), because the preview's only transform is the CSS
+  `translate() scale()` that `applyView()` writes - the SVG's `width`/`height` match its
+  `viewBox`, so there is no second scale. A stored offset is therefore **independent of
+  zoom and of pan**: re-zooming or panning re-renders the same scene geometry and cannot
+  move a label that the user placed. This is verified at three zoom levels in browser
+  `§Manual annotation placement`, and the arithmetic is finding
+  [F3](findings.md#f3-drag-at-zoom-is-verified-against-the-stored-scene-offset).
+- The notice overlay described in §8 is drawn above the callouts and, in the preview, is
+  hit-testable, so a label underneath it cannot be grabbed until the notice is gone
+  ([F12](findings.md#f12-the-in-drawing-notice-overlay-intercepts-pointer-events-over-the-annotations-beneath-it)).
 - Both are emitted as `<g id="callout:…">` / span-label groups in SVG and as a line +
   polygon + text run in PDF, from the same scene record.
 - The annotation layout is computed in an unpadded frame and shifted by the scene

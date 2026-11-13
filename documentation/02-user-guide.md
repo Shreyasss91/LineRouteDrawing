@@ -434,7 +434,13 @@ selected mode.
 - The drag is stored as an offset (`{dx, dy, candidateIndex}`) keyed by asset id in
   `state.loadPlacements` / `state.spanPlacements`, not as a screen position.
 - Pointer travel is divided by the current zoom, so a zoomed-out drag does not move
-  twice as far as the cursor did.
+  twice as far as the cursor did. The stored figure is always **scene units, never screen
+  pixels**, which is why zooming in or out later, or panning the drawing, cannot move a
+  label you placed. Verified at three zoom levels in browser `§8`.
+- One caveat: while some spans or loads are still unmeasured, the in-drawing "incomplete"
+  notice is drawn above the labels and catches the pointer, so a label sitting under it
+  will pan the drawing instead of moving. Measure the spans first and the notice goes away
+  ([F12](findings.md#f12-the-in-drawing-notice-overlay-intercepts-pointer-events-over-the-annotations-beneath-it)).
 - Because it is an offset from the automatic placement, the annotation **follows its
   pole** when the drawing is re-laid-out, survives a reload, and is saved into the
   project file.

@@ -138,7 +138,7 @@ not been demonstrated.
 
 - The whole domain layer: **485 Node tests across 30 files**, all passing on the
   current working tree.
-- The application in a real browser: **274 checks in 14 sections**, all passing,
+- The application in a real browser: **298 checks in 14 sections**, all passing,
   including one-page print fit for **all four layouts** and the TC geometry on the
   printed sheet.
 
@@ -153,7 +153,7 @@ not been demonstrated.
 | Area | What was not done | Risk |
 | --- | --- | --- |
 | **A4 portrait and A3 landscape printing** | Never opened in a real print dialog; automated fit check only | Low — the fit arithmetic is identical across layouts and tested; but paper selection has not been seen with a human eye |
-| **Drag at zoom ≠ 1** | The zoom divisor is implemented but never exercised by a test | Low — the code divides pointer travel by the current zoom, but a regression would go unnoticed |
+| **A label under the completeness notice cannot be dragged** | The in-drawing notice is hit-testable and is drawn above the callouts, so a press on it pans the viewport instead of moving the label ([F12](findings.md#f12-the-in-drawing-notice-overlay-intercepts-pointer-events-over-the-annotations-beneath-it)) | Low–Medium — only while a survey is incomplete; measuring the spans removes the notice |
 | **Editing a route in place** | `startEdit()` / "Save changes" has no automated test | Medium — a common operation guarded only by hand testing |
 | **Row delete button** | The engine path is tested (`route_identity.test.js` 7) but not the button | Low |
 | **Firefox and Safari** | Never run | Medium — no browser-specific code, but untested |

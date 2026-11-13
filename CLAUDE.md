@@ -34,7 +34,7 @@ node scripts/serve.js          # run the app: http://127.0.0.1:8080/
 node scripts/serve.js 3000     # or pick a port
 
 npm test                       # 485 Node tests, no dependencies needed (~1.2s)
-npm run test:browser           # 274 browser checks (needs Playwright + Chrome)
+npm run test:browser           # 298 browser checks (needs Playwright + Chrome)
 npm run test:print:headed      # manual print-dialog check; needs a real terminal
 ```
 

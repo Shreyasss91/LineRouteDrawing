@@ -1277,63 +1277,430 @@ try {
   await page.waitForTimeout(250);
   await addRoute(page, { from: 'origin', direction: 'south', spans: 2 });
   const dragRows = await readRouteRows(page);
+  const dragNodeId = `dst:${dragRows[0].id}`;
   await page.click('#tab-loads');
-  await addLoad(page, { nodeId: `dst:${dragRows[0].id}`, value: 40, unit: 'kVA' });
+  await addLoad(page, { nodeId: dragNodeId, value: 40, unit: 'kVA' });
 
-  // Start from a known view. Clicking a pole in the previous section can leave the
-  // drawing panned so the callout sits outside the canvas, and a drag that begins on
-  // empty SVG moves nothing - which would look like a broken drag feature rather than
-  // a mistimed test. Fit the drawing first, then take the callout's real target.
+  // Measure every span, so the in-drawing "measurements incomplete" notice is not
+  // drawn. That notice is a filled overlay sitting above the callouts, and a press on
+  // it is a press on the notice rather than on the label beneath - a separate, pre-
+  // existing limitation recorded as F12, and not what this section is testing. Keeping
+  // it out of the fixture keeps these checks about the drag arithmetic.
+  await page.click('#tab-spans');
+  await page.fill('#field-default-length', '30');
+  await page.click('#btn-apply-default');
+  await page.waitForTimeout(400);
+
   await page.click('#btn-fit');
   await page.waitForTimeout(300);
   await page.mouse.move(20, 20);
   await page.waitForTimeout(120);
 
-  // Read the callout's position from its own SVG coordinates, re-queried each time.
-  // A re-render replaces the element, so a saved handle would report the old geometry
-  // and make a working drag look like a no-op.
-  const calloutPosition = () =>
-    page.evaluate(() => {
-      const plate = document.querySelector('#preview-canvas rect.callout-plate');
-      if (!plate) return null;
-      return { x: Number(plate.getAttribute('x')), y: Number(plate.getAttribute('y')) };
-    });
-
-  const beforePosition = await calloutPosition();
-  const plate = await page.locator('#preview-canvas rect.callout-plate').first().boundingBox();
-  if (plate) {
-    const startX = plate.x + plate.width / 2;
-    const startY = plate.y + plate.height / 2;
-    await page.mouse.move(startX, startY);
-    await page.mouse.down();
-    for (let step = 1; step <= 8; step += 1) {
-      await page.mouse.move(startX + step * 10, startY + step * 5);
-      await page.waitForTimeout(20);
-    }
-    await page.mouse.up();
-    await page.waitForTimeout(400);
-  }
-  const afterPosition = await calloutPosition();
-  const moved =
-    beforePosition && afterPosition
-      ? Math.abs(afterPosition.x - beforePosition.x) > 10 || Math.abs(afterPosition.y - beforePosition.y) > 10
-      : false;
   check(
-    'a callout can be dragged',
-    moved,
-    beforePosition && afterPosition
-      ? `dx=${Math.round(afterPosition.x - beforePosition.x)} dy=${Math.round(afterPosition.y - beforePosition.y)}`
-      : 'callout not found',
+    'the fixture draws no notice overlay above the callouts',
+    (await page.evaluate(() => !document.querySelector('#preview-canvas svg #notice'))),
   );
 
-  await page.waitForTimeout(700);
-  const reloadedPosition = await calloutPosition();
-  const survived =
-    reloadedPosition && afterPosition
-      ? Math.abs(reloadedPosition.x - afterPosition.x) < 1 && Math.abs(reloadedPosition.y - afterPosition.y) < 1
-      : false;
-  check('the dragged position survives a reload', survived);
+  /*
+   * The drag contract, and why zoom matters.
+   *
+   * A callout is drawn at a SCENE coordinate and shown through a CSS
+   * `scale(view.zoom)` on the canvas, so one scene unit is `zoom` screen pixels.
+   * The persisted manual offset is scene-space, therefore a drag must store
+   *
+   *     scene delta = screen pointer delta / zoom
+   *
+   * and the label must appear to move by exactly the pointer delta. At fit zoom the
+   * two are close enough that a raw-pixel implementation looks correct, and it only
+   * breaks once the drawing is zoomed - which is why these checks run at three
+   * deliberately different zooms. Neither number is recomputed from a formula here:
+   * `zoom` is read back from the rendered transform `applyView()` writes, and the
+   * scene position is read from the plate's own SVG attribute, which is in scene
+   * units by construction.
+   */
 
+  /** Everything the drag contract is measured against, read from the live page. */
+  const measureCallout = () =>
+    page.evaluate(() => {
+      const canvas = document.querySelector('#preview-canvas');
+      const plate = canvas.querySelector('rect.callout-plate');
+      const group = plate?.closest('[data-annot-id]');
+      const stage = document.querySelector('#preview-stage');
+      // The rendered transform is what the reader actually sees: `applyView()` writes
+      // it from the live viewport, so reading it back is authoritative and keeps the
+      // transform formula out of the test.
+      const raw = getComputedStyle(canvas).transform;
+      let zoom = 1;
+      let panX = 0;
+      let panY = 0;
+      if (raw && raw !== 'none') {
+        const m = raw.match(/matrix\(([^)]+)\)/);
+        if (m) {
+          const v = m[1].split(',').map(Number);
+          zoom = Math.hypot(v[0], v[1]);
+          panX = v[4];
+          panY = v[5];
+        }
+      }
+      const box = plate ? plate.getBoundingClientRect() : null;
+      const stageBox = stage ? stage.getBoundingClientRect() : null;
+      const screen = box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : null;
+      return {
+        zoom,
+        panX,
+        panY,
+        annotId: group?.getAttribute('data-annot-id') ?? null,
+        // The plate's x/y attributes are scene units, never screen pixels.
+        scene: plate
+          ? { x: Number(plate.getAttribute('x')), y: Number(plate.getAttribute('y')) }
+          : null,
+        screen,
+        onStage: Boolean(
+          screen &&
+            stageBox &&
+            screen.x > stageBox.x &&
+            screen.x < stageBox.x + stageBox.width &&
+            screen.y > stageBox.y &&
+            screen.y < stageBox.y + stageBox.height,
+        ),
+      };
+    });
+
+  /** The persisted manual offsets, as the project stores them. */
+  const readPlacements = async () => (await readSavedProject(page))?.loadPlacements ?? {};
+
+  /**
+  * A point inside the callout plate that actually belongs to the callout.
+  *
+  * Pointing at the plate's geometric centre is not reliable: other annotation text
+  * (span lengths, designations) is drawn over it, and a press on that text is not a
+  * press on the callout - the event falls through to the stage and pans instead. So
+  * the grab point is searched for within the plate, which is what a reader does when
+  * they aim at a visible piece of the label.
+  */
+  const findGrabPoint = (expectedId) =>
+    page.evaluate((expected) => {
+      const canvas = document.querySelector('#preview-canvas');
+      const plate = canvas.querySelector('rect.callout-plate');
+      if (!plate) return null;
+      const box = plate.getBoundingClientRect();
+      // Centre first, then progressively nearer the edges.
+      const fractions = [0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9];
+      for (const fy of fractions) {
+        for (const fx of fractions) {
+          const x = Math.round(box.x + box.width * fx);
+          const y = Math.round(box.y + box.height * fy);
+          const el = document.elementFromPoint(x, y);
+          const group = el?.closest?.('[data-annot-id]');
+          if (group && group.getAttribute('data-annot-id') === expected) return { x, y };
+        }
+      }
+      return null;
+    }, expectedId);
+
+  /** Drag the callout by an exact screen delta and measure every view of it. */
+  const dragCallout = async ({ dx, dy, steps = 10 }) => {
+    const before = await measureCallout();
+    const beforePlacements = await readPlacements();
+    const grab = await findGrabPoint(dragNodeId);
+    if (!grab) {
+      return { key: dragNodeId, zoom: before.zoom, pointer: { dx, dy }, grabbable: false,
+        sceneDelta: { x: 0, y: 0 }, storedDelta: { x: 0, y: 0 },
+        screenDelta: { x: 0, y: 0 }, before, after: before };
+    }
+    const startX = grab.x;
+    const startY = grab.y;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    for (let s = 1; s <= steps; s += 1) {
+      await page.mouse.move(
+        startX + Math.round((dx * s) / steps),
+        startY + Math.round((dy * s) / steps),
+      );
+      await page.waitForTimeout(15);
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(450);
+    const after = await measureCallout();
+    const afterPlacements = await readPlacements();
+    const key =
+      Object.keys(afterPlacements).find((k) => afterPlacements[k] && !beforePlacements[k]) ??
+      Object.keys(afterPlacements)[0];
+    const from = beforePlacements[key] ?? { dx: 0, dy: 0 };
+    const to = afterPlacements[key] ?? { dx: 0, dy: 0 };
+    return {
+      key,
+      zoom: before.zoom,
+      // The pointer delta is the independent variable: the last step lands exactly on
+      // start + delta, so this is exact rather than measured.
+      pointer: { dx, dy },
+      sceneDelta: { x: after.scene.x - before.scene.x, y: after.scene.y - before.scene.y },
+      storedDelta: { x: to.dx - from.dx, y: to.dy - from.dy },
+      stored: to,
+      screenDelta: { x: after.screen.x - before.screen.x, y: after.screen.y - before.screen.y },
+      before,
+      after,
+    };
+  };
+
+  /** Fit, then apply a zoom level with the real controls. */
+  const zoomTo = async (steps) => {
+    await page.click('#btn-fit');
+    await page.waitForTimeout(250);
+    for (let i = 0; i < Math.abs(steps); i += 1) {
+      await page.click(steps > 0 ? '#btn-zoom-in' : '#btn-zoom-out');
+      await page.waitForTimeout(120);
+    }
+    await page.waitForTimeout(250);
+    return measureCallout();
+  };
+
+  const format = (r) =>
+    (r.grabbable === false ? 'NO GRAB POINT ON THE CALLOUT | ' : '') +
+    `zoom=${r.zoom.toFixed(4)} pointer=(${r.pointer.dx},${r.pointer.dy}) ` +
+    `scene=(${r.sceneDelta.x.toFixed(2)},${r.sceneDelta.y.toFixed(2)}) ` +
+    `stored=(${r.storedDelta.x.toFixed(2)},${r.storedDelta.y.toFixed(2)}) ` +
+    `expected=(${(r.pointer.dx / r.zoom).toFixed(2)},${(r.pointer.dy / r.zoom).toFixed(2)}) ` +
+    `screen=(${r.screenDelta.x.toFixed(2)},${r.screenDelta.y.toFixed(2)})`;
+
+  const SCENE_TOLERANCE = 0.75; // scene units; measured drift is under 0.02
+  const SCREEN_TOLERANCE = 1; // CSS pixels; bounding boxes are subpixel
+
+  /** The whole contract: stored and drawn deltas match the pointer delta over zoom. */
+  const movedAsExpected = (r) =>
+    r.grabbable !== false &&
+    Math.abs(r.storedDelta.x - r.pointer.dx / r.zoom) <= SCENE_TOLERANCE &&
+    Math.abs(r.storedDelta.y - r.pointer.dy / r.zoom) <= SCENE_TOLERANCE &&
+    Math.abs(r.sceneDelta.x - r.pointer.dx / r.zoom) <= SCENE_TOLERANCE &&
+    Math.abs(r.sceneDelta.y - r.pointer.dy / r.zoom) <= SCENE_TOLERANCE &&
+    Math.abs(r.screenDelta.x - r.pointer.dx) <= SCREEN_TOLERANCE &&
+    Math.abs(r.screenDelta.y - r.pointer.dy) <= SCREEN_TOLERANCE;
+
+  // Fit zoom is itself a non-default scale, so even the baseline is not zoom 1.
+  const fitView = await measureCallout();
+  check(
+    'the drawing is fitted at a non-unity zoom',
+    fitView.zoom > 0.5 && Math.abs(fitView.zoom - 1) > 0.1 && fitView.onStage === true,
+    `zoom=${fitView.zoom.toFixed(4)} onStage=${fitView.onStage}`,
+  );
+  const loadId = Object.keys(await readPlacements()).length;
+
+  /* ---------------- Baseline: dragging at fit zoom ---------------- */
+
+  // Drag up and to the left, which also parks the label nearer the middle of the scene
+  // so the zoomed-in case below cannot push it off the stage.
+  const atFit = await dragCallout({ dx: -60, dy: -60 });
+  check('a callout can be dragged', movedAsExpected(atFit), format(atFit));
+  check(
+    'the drag was recognised as a drag, not a click',
+    /Annotation moved/.test(await page.locator('#export-status').textContent()),
+    await page.locator('#export-status').textContent(),
+  );
+  check(
+    'the offset was persisted under the callout it belongs to',
+    Object.keys(await readPlacements()).length === loadId + 1 && atFit.key === dragNodeId,
+    `keys=${Object.keys(await readPlacements()).join('|')}`,
+  );
+
+  /* ---------------- Zoomed in ---------------- */
+
+  const zoomedInView = await zoomTo(2);
+  check(
+    'zooming in raised the rendered scale above fit',
+    zoomedInView.zoom > fitView.zoom * 1.4,
+    `fit=${fitView.zoom.toFixed(4)} zoomedIn=${zoomedInView.zoom.toFixed(4)}`,
+  );
+  check('the callout is still on stage when zoomed in', zoomedInView.onStage === true);
+  const zoomedIn = await dragCallout({ dx: 53, dy: 27 });
+  check('dragging works when zoomed in', movedAsExpected(zoomedIn), format(zoomedIn));
+
+  /* ---------------- Zoomed out ---------------- */
+
+  const zoomedOutView = await zoomTo(-3);
+  check(
+    'zooming out dropped the rendered scale below fit',
+    zoomedOutView.zoom < fitView.zoom * 0.7,
+    `fit=${fitView.zoom.toFixed(4)} zoomedOut=${zoomedOutView.zoom.toFixed(4)}`,
+  );
+  const zoomedOut = await dragCallout({ dx: -17, dy: -9 });
+  check('dragging works when zoomed out', movedAsExpected(zoomedOut), format(zoomedOut));
+
+  // The discriminating check. Each drag stored `pointer delta / zoom`, so the conversion
+  // factor each one applied is one over its zoom. Those two factors must differ by
+  // exactly the ratio of the zooms - a raw-pixel implementation applies 1 at every zoom,
+  // so its ratio would be 1 and no single scale could satisfy both drags above.
+  const factorIn = zoomedIn.storedDelta.x / zoomedIn.pointer.dx;
+  const factorOut = zoomedOut.storedDelta.x / zoomedOut.pointer.dx;
+  const zoomRatio = zoomedInView.zoom / zoomedOutView.zoom;
+  check(
+    'each zoom applied its own conversion, matching the ratio of the zooms',
+    Math.abs(zoomedIn.storedDelta.x - zoomedIn.pointer.dx / zoomedInView.zoom) <= SCENE_TOLERANCE &&
+      Math.abs(zoomedOut.storedDelta.x - zoomedOut.pointer.dx / zoomedOutView.zoom) <= SCENE_TOLERANCE &&
+      Math.abs(factorOut / factorIn - zoomRatio) <= 0.02,
+    `factorIn=1/${(1 / factorIn).toFixed(3)} factorOut=1/${(1 / factorOut).toFixed(3)} ` +
+      `ratio=${(factorOut / factorIn).toFixed(3)} zoomRatio=${zoomRatio.toFixed(3)}`,
+  );
+
+  /* ---------------- Zoom alone must not move a manual offset ---------------- */
+
+  const offsetBeforeZoom = await readPlacements();
+  const sceneBeforeZoom = await measureCallout();
+  await page.click('#btn-zoom-in');
+  await page.waitForTimeout(200);
+  await page.click('#btn-zoom-in');
+  await page.waitForTimeout(300);
+  const afterZoomView = await measureCallout();
+  const offsetAfterZoom = await readPlacements();
+  check(
+    'changing the zoom leaves the stored offset untouched',
+    JSON.stringify(offsetBeforeZoom) === JSON.stringify(offsetAfterZoom),
+    JSON.stringify(offsetAfterZoom),
+  );
+  check(
+    'changing the zoom leaves the scene position untouched',
+    Math.abs(afterZoomView.scene.x - sceneBeforeZoom.scene.x) < 0.01 &&
+      Math.abs(afterZoomView.scene.y - sceneBeforeZoom.scene.y) < 0.01,
+    `${JSON.stringify(sceneBeforeZoom.scene)} -> ${JSON.stringify(afterZoomView.scene)}`,
+  );
+
+  /* ---------------- Panning must not leak into the offset ---------------- */
+
+  const stageBox = await page.locator('#preview-stage').boundingBox();
+  const beforePan = await measureCallout();
+  await page.mouse.move(stageBox.x + 15, stageBox.y + 15);
+  await page.mouse.down();
+  await page.mouse.move(stageBox.x + 55, stageBox.y + 40);
+  await page.waitForTimeout(80);
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  const afterPan = await measureCallout();
+  check(
+    'dragging the stage pans the viewport',
+    Math.abs(afterPan.panX - beforePan.panX) > 20 && Math.abs(afterPan.panY - beforePan.panY) > 10,
+    `pan ${beforePan.panX.toFixed(1)},${beforePan.panY.toFixed(1)} -> ` +
+      `${afterPan.panX.toFixed(1)},${afterPan.panY.toFixed(1)}`,
+  );
+  const afterPanDrag = await dragCallout({ dx: -34, dy: -17 });
+  check(
+    'a drag after panning still converts by zoom alone',
+    movedAsExpected(afterPanDrag),
+    format(afterPanDrag),
+  );
+
+  /* ---------------- A genuine reload ---------------- */
+
+  const beforeReload = await measureCallout();
+  const storedBeforeReload = await readPlacements();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg');
+  await page.waitForTimeout(700);
+  const afterReload = await measureCallout();
+  const storedAfterReload = await readPlacements();
+  check(
+    'the callout keeps its scene position across a reload',
+    Math.abs(afterReload.scene.x - beforeReload.scene.x) < 0.01 &&
+      Math.abs(afterReload.scene.y - beforeReload.scene.y) < 0.01,
+    `${JSON.stringify(beforeReload.scene)} -> ${JSON.stringify(afterReload.scene)}`,
+  );
+  check(
+    'the persisted offset is unchanged by the reload',
+    JSON.stringify(storedBeforeReload) === JSON.stringify(storedAfterReload),
+    JSON.stringify(storedAfterReload),
+  );
+  check(
+    'the reloaded view is re-fitted, so the zoom differs',
+    Math.abs(afterReload.zoom - beforeReload.zoom) > 0.05,
+    `zoom ${beforeReload.zoom.toFixed(3)} -> ${afterReload.zoom.toFixed(3)}`,
+  );
+
+  // Re-zoom after the reload: the stored position is scene-space, so it must hold.
+  await page.click('#btn-zoom-out');
+  await page.waitForTimeout(150);
+  await page.click('#btn-zoom-out');
+  await page.waitForTimeout(300);
+  const afterReloadZoom = await measureCallout();
+  check(
+    're-zooming after a reload does not disturb the saved position',
+    JSON.stringify(await readPlacements()) === JSON.stringify(storedBeforeReload) &&
+      Math.abs(afterReloadZoom.scene.x - afterReload.scene.x) < 0.01 &&
+      Math.abs(afterReloadZoom.scene.y - afterReload.scene.y) < 0.01,
+    `${JSON.stringify(afterReloadZoom.scene)} stored=${JSON.stringify(await readPlacements())}`,
+  );
+
+  /* ---------------- Dragging must not touch authored data ---------------- */
+
+  const authored = await readSavedProject(page);
+  check(
+    'dragging left the routes untouched',
+    authored?.routes?.length === 1 &&
+      authored.routes[0].from === 'origin' &&
+      authored.routes[0].direction === 'south' &&
+      authored.routes[0].spans === 2,
+    JSON.stringify(authored?.routes),
+  );
+  check(
+    'dragging left the load identity, target and value untouched',
+    authored?.loads?.length === 1 &&
+      authored.loads[0].id === 'load-1' &&
+      authored.loads[0].nodeId === dragNodeId &&
+      authored.loads[0].value === 40 &&
+      authored.loads[0].unit === 'kVA',
+    JSON.stringify(authored?.loads),
+  );
+  check(
+    'the callout still belongs to the same asset',
+    afterReloadZoom.annotId === dragNodeId,
+    `${afterReloadZoom.annotId} vs ${dragNodeId}`,
+  );
+
+  /* ---------------- A click is not a drag ---------------- */
+
+  const beforeClick = await readPlacements();
+  const clickTarget = await measureCallout();
+  await page.mouse.move(Math.round(clickTarget.screen.x), Math.round(clickTarget.screen.y));
+  await page.mouse.down();
+  await page.waitForTimeout(60);
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  check(
+    'a click on a callout is not recorded as a drag',
+    JSON.stringify(await readPlacements()) === JSON.stringify(beforeClick),
+    JSON.stringify(await readPlacements()),
+  );
+
+  /* ---------------- Automatic placement is unaffected ---------------- */
+
+  // A second load, never dragged, keeps its automatic placement: no stored offset yet a
+  // callout is still drawn, so the manual path has not taken over the automatic one.
+  await page.click('#tab-loads');
+  await addLoad(page, { nodeId: 'origin', value: 15, unit: 'kW' });
+  await page.waitForTimeout(300);
+  const placementsAfterSecondLoad = await readPlacements();
+  const autoPlaced = await page.evaluate(() => {
+    const svg = document.querySelector('#preview-canvas svg');
+    const origin = svg.querySelector('[id="callout:origin"]');
+    return {
+      present: Boolean(origin),
+      text: origin ? origin.textContent.trim() : null,
+      plates: svg.querySelectorAll('rect.callout-plate').length,
+    };
+  });
+  check(
+    'an annotation without an offset is still placed automatically',
+    autoPlaced.present === true && /15 kW/.test(autoPlaced.text ?? '') && autoPlaced.plates === 2,
+    JSON.stringify(autoPlaced),
+  );
+  check(
+    'the new load records no manual offset',
+    placementsAfterSecondLoad.origin === undefined,
+    JSON.stringify(placementsAfterSecondLoad),
+  );
+  check(
+    'the dragged offset is unchanged by the second load',
+    JSON.stringify(placementsAfterSecondLoad[dragNodeId]) ===
+      JSON.stringify(storedBeforeReload[dragNodeId]),
+    JSON.stringify(placementsAfterSecondLoad),
+  );
   /* ---------------- Spreadsheet workflow ---------------- */
 
   section('Spreadsheet and CSV workflow');

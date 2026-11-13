@@ -106,10 +106,58 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
   so `current.registry` always exists. The null check remains as a guard against a future
   reordering and is documented as such.
 
+### Verification
+
+- **Drag-at-zoom now has executable coverage (finding F3 closed). No production change.**
+  A callout is drawn at a scene coordinate and shown through the CSS
+  `translate() scale(view.zoom)` that `applyView()` writes; the SVG's `width`/`height`
+  match its `viewBox`, so there is no second scale. The persisted manual offset is
+  therefore scene-space and the contract is exactly
+
+  ```
+  scene-space delta = screen-space delta / view.zoom
+  ```
+
+  The browser suite only ever dragged at fit zoom, so a regression in that division would
+  have gone unnoticed. Browser §8 now drags a real callout with real pointer events at
+  three deliberately different zooms:
+
+  | Zoom | Level | Pointer delta | Scene delta = pointer ÷ zoom |
+  | --- | --- | --- | --- |
+  | fit | 2.8447 | (-60, -60) | (-21.09, -21.09) |
+  | in ×2 | 4.4449 | (+53, +27) | (+11.92, +6.07) |
+  | out ×3 | 1.4565 | (-17, -9) | (-11.67, -6.18) |
+
+  Each one asserts the whole gesture rather than only that the label moved: the change in
+  the stored `dx`/`dy`, the change in the plate's own SVG `x`/`y`, and the label's
+  on-screen movement (which must equal the pointer delta). The applied conversion factors
+  differ by exactly the ratio of the zooms - measured 3.052 against 3.052 - which a
+  raw-pixel implementation cannot reproduce.
+
+  Also covered: zooming and panning leave the stored offset untouched; a genuine reload
+  (previously this check only waited, it never reloaded) keeps the scene position while
+  re-fitting the zoom; re-zooming after that reload still does not move the label;
+  dragging changes no route, load, node or span-length data; a click is not recorded as a
+  drag; an annotation with no offset is still placed automatically.
+
+  Mutation: replacing `(clientX - start.x) / scale` with the raw pixel delta fails 5 of
+  the section's checks, with the conversion-factor check reporting
+  `factorIn=1/1.000 factorOut=1/1.000 ratio=1.000 zoomRatio=3.052` - the exact signature of
+  the defect. `src/ui/app.js` restored byte-for-byte (`cmp` clean).
+
+- Browser §8 grew from 2 to 26 checks; suite 274 → 298 in 14 sections.
+
+- **New finding F12 recorded, not fixed:** the in-drawing "measurements incomplete" notice
+  is drawn above the callouts and is hit-testable, so a label under it cannot be dragged -
+  a press there pans the viewport instead. Found while writing the F3 tests and unrelated
+  to the zoom conversion, so it was recorded rather than folded in. It is confined to the
+  preview (the notice is preview-only, F6) and disappears once every span is measured; the
+  tests keep it out of the fixture deliberately.
+
 ### Validation
 
 - `npm test` → 485 tests, 485 pass, 0 fail.
-- `npm run test:browser` → 274/274 checks passed, 14 sections (was 257/257 before both acts).
+- `npm run test:browser` → 298/298 checks passed, 14 sections (was 257/257 before these acts).
 - Mutation (fail-closed guard): restoring id-only resolution with a raw-id fallback fails 3
   checks, including "the shared-node project is still openable"
   (`{"ok":false,"code":"INELIGIBLE_LOAD_TARGET"}`).
@@ -117,7 +165,9 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
   reproducing the original symptoms exactly - orphan warning, `— (missing) 0,-2`, no
   callout, alias written on save.
 - Mutation (unresolved handling): silently reidentifying an unresolved load fails test 26.
-- Both sources restored byte-for-byte (`cmp` clean); suites re-run green.
+- Mutation (drag conversion): raw pointer deltas instead of `delta / zoom` fail 5 browser
+  checks, including the conversion-factor check.
+- All sources restored byte-for-byte (`cmp` clean); suites re-run green.
 
 ### Fixed
 

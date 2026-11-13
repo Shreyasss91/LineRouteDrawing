@@ -10,7 +10,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | --- | --- | --- | --- |
 | [F1](#f1-the-form-and-the-project-parser-disagree-on-documented-limits) | Form vs. parser limits | Low | Open — documented, not changed |
 | [F2](#f2-an-edited-route-is-now-covered-by-a-browser-test) | Untested UI path | Medium | **Closed** — 32 browser checks exercise the edit form |
-| [F3](#f3-drag-at-zoom-is-implemented-but-unverified) | Untested UI behaviour | Low | Open |
+| [F3](#f3-drag-at-zoom-is-verified-against-the-stored-scene-offset) | Untested UI behaviour | Low | **Closed** — drag verified at three zoom levels against the stored scene offset |
 | [F4](#f4-the-static-spacing-minimum-in-the-markup-is-stale) | Stale literal | Low | Open |
 | [F5](#f5-unknown-keys-in-a-project-file-are-ignored-silently) | Forward compatibility | Low | Open |
 | [F6](#f6-the-completeness-notice-is-preview-only) | Export completeness | Low | Open — arguably by design |
@@ -19,6 +19,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | Open |
 | [F10](#f10-a-load-cannot-reach-a-tc-point-by-creation-move-edit-import-or-file) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — five guarded boundaries covering creation, move, route edit, import and file; fail-closed, each with executable evidence |
 | [F11](#f11-an-aliased-load-id-is-not-resolved-by-the-schedule-and-annotation-layers) | Alias identity handled inconsistently | Low | **Closed** — aliases canonicalised once at the validation boundary |
+| [F12](#f12-the-in-drawing-notice-overlay-intercepts-pointer-events-over-the-annotations-beneath-it) | Interaction | Low–Medium | Open — recorded while testing F3, not changed |
 
 ---
 
@@ -119,17 +120,53 @@ The first mutation is the important one: regenerating the route id is exactly th
 regression this finding was written about, and it now fails ten ways because the load is
 attached to the route's own destination rather than to a point shared with a neighbour.
 
-## F3 — Drag at zoom is implemented but unverified
+## F3 — Drag at zoom is verified against the stored scene offset
 
-**Observed.** `app.js` divides pointer travel by the current zoom so a zoomed-out drag
-moves the same distance as the cursor ("Scene-space position at the moment the drag
-began, so zoom never bends the move"). The browser suite drags only at fit zoom.
+**Status: closed.** Verified by browser regression coverage; **no production change was
+needed**, because the arithmetic was already correct.
 
-**Impact.** Low — the arithmetic is simple — but an untested interaction that involves
-two coordinate systems is exactly the kind that breaks quietly.
+**Observed.** `app.js` divides pointer travel by `view.zoom` before adding it to the
+stored manual offset, so a zoomed-out drag moves the same scene distance the cursor
+travelled on screen. The browser suite dragged only at fit zoom, leaving the conversion
+itself unexercised.
 
-**Suggested fix.** Add a browser check that zooms in twice, drags a callout by a known
-screen distance, and asserts the stored offset matches the scene-space distance.
+**The transform, established from source rather than assumed.** The preview is an SVG
+whose `width`/`height` match its `viewBox`, drawn at a 1:1 scene-unit-to-pixel scale, and
+the canvas is placed with a CSS `translate(view.x, view.y) scale(view.zoom)` written by
+`applyView()`. There is no viewBox scaling and no second transform, so the only scale is
+`view.zoom` and the contract is exactly:
+
+```
+scene-space delta = screen-space delta / view.zoom
+```
+
+The persisted manual offset (`loadPlacements[nodeId] = {dx, dy, candidateIndex}`) is a
+displacement from the automatically chosen label position in **scene units**. It is
+therefore independent of both zoom and pan: zooming re-renders the same scene geometry
+and panning only changes `view.x`/`view.y`.
+
+**Verified.** Browser §"Manual annotation placement" now drags a real callout with real
+pointer events at three deliberately different zooms - fit (`zoom ≈ 2.84`), zoomed in
+twice (`≈ 4.44`) and zoomed out three times (`≈ 1.46`) - and for each one asserts all
+three views of the same gesture:
+
+| Assertion | What it proves |
+| --- | --- |
+| pointer travel `÷ zoom` equals the change in the stored `dx`/`dy` | the persisted offset is scene-space |
+| the same figure equals the change in the plate's own SVG `x`/`y` | the label is drawn where it was stored |
+| the label's on-screen movement equals the pointer travel | the label keeps up with the cursor at any zoom |
+
+The zoom is read back from the rendered `matrix()` transform `applyView()` writes, and the
+scene position from the plate's SVG attributes, so the test does not restate the formula.
+Across the two non-fit zooms the applied conversion factor differs by exactly the ratio of
+the zooms (`3.052` measured against `3.052`), which a raw-pixel implementation cannot
+reproduce. Panning, re-zooming after a reload, and a reload itself all leave the stored
+offset unchanged, and dragging changes no route, load, node or span-length data.
+
+**Regression strength.** Replacing `(clientX - start.x) / scale` with the raw pixel delta
+fails 5 of the section's checks, including the conversion-factor check, which then reports
+`factorIn=1/1.000 factorOut=1/1.000 ratio=1.000 zoomRatio=3.052` - the exact signature of
+the defect. The source was restored byte-for-byte afterwards.
 
 ## F4 — The static spacing minimum in the markup is stale
 
@@ -251,7 +288,7 @@ load on a TC point is refused by the data model, not placed anyway"* but asserte
 ("the eligibility predicate excludes a TC point from carrying a load"), and the real
 model-refusal tests now live in `test/load_eligibility.test.js`.
 
-**Fix.** Four guarded boundaries, distinguished in the docs so none is claimed to do
+**Fix.** Five guarded boundaries, distinguished in the docs so none is claimed to do
 another's job:
 
 1. `addLoad()` — **creating** a load. Fails closed: refuses with
@@ -444,3 +481,51 @@ and keeps its spelling.
 the same question. Fixing them individually means four implementations of one rule and four
 chances to disagree, which is exactly how this defect arose; normalising at the single
 entry point gives them nothing to disagree about.
+
+---
+
+## F12 — The in-drawing notice overlay intercepts pointer events over the annotations beneath it
+
+**Status: open. Recorded, not changed.** Discovered while adding the F3 zoom coverage; it
+is unrelated to the zoom conversion, so it was left alone rather than folded into an act
+about coordinate arithmetic.
+
+**Observed.** When a drawing has unmeasured spans or loads, the renderer adds an
+`#notice` group (`src/render/svg.js`) carrying a filled white rectangle
+(`fill="#ffffff" fill-opacity="0.92"`) and a centred message. It is appended **after**
+`#load-callouts` and `#span-lengths`, so it paints over them, and because the rectangle has
+default `pointer-events` it also **takes the hit** for anything underneath.
+
+A pointer press that lands on the notice is therefore a press on the notice, not on the
+label beneath: `pointerdown` on the canvas finds no `[data-annot-id]` ancestor, the drag
+never starts, and the event reaches the stage listener, which **pans the viewport**
+instead. So a callout that happens to sit under the notice cannot be dragged at all, and
+attempting it moves the whole drawing.
+
+Reproduced while writing the F3 tests: with two unmeasured spans, a callout dragged to a
+position under the notice returned `elementFromPoint` -> the notice's `text` for every
+sample point across its plate, and a drag gesture panned the viewport (`panX`
+`342.3 -> 382.2`) while the stored offset stayed at `{dx: -20.84, dy: -21.2}`.
+
+**Impact.** Low–Medium. It is not reachable while every span and load is measured —
+the notice is absent then — but an incomplete survey is an ordinary working state, and in
+that state some labels simply cannot be moved. The failure is quiet and misleading: the
+user sees the drawing jump rather than an explanation. No data is lost or corrupted, which
+is why it is not higher.
+
+**Why it was not folded into F3.** F3 concerns the screen-space-to-scene-space conversion
+of drag travel. This is a hit-testing and paint-order matter in the renderer, and changing
+it needs its own decision about whether an informational overlay should be interactive at
+all. It is also confined to the on-screen preview: `showCompleteNotice` is true only for
+the preview profile, so the notice is not drawn into an exported PDF or SVG (see
+[F6](#f6-the-completeness-notice-is-preview-only)) and this cannot affect a printed sheet.
+
+**Suggested direction, if it is taken up.** Mark the notice non-interactive —
+`pointer-events="none"` on the `#notice` group — so it stays visible and exported but
+stops absorbing input, and add a browser check that presses a point known to be under the
+notice and asserts that the drag either starts or that the viewport does not move. Worth
+confirming at the same time that the notice is not the only overlay relying on default
+pointer behaviour.
+
+**Workaround, documented rather than coded.** Measure the spans first; the notice then
+disappears and every callout is draggable.
