@@ -487,6 +487,13 @@ it scores, and it is called for every annotation. With *n* annotations, ~1044 ob
 13.5 ms) and a large share of the 92 ms a recompute blocks the main thread for; on the
 fully surveyed drawing a recompute is 225 ms. Below a few hundred spans it is invisible.
 
+**Prerequisite landed.** The placement contract this fix must honour now exists:
+`test/placement_characterization.test.js` compares every placement in all four baseline
+drawings against fixtures recorded from this unoptimized code, and
+`test/support/exhaustive_collisions.mjs` keeps the exhaustive scan as a test-only oracle
+([Testing §6](08-testing.md#6-annotation-placement-the-exact-output-contract)). Nothing
+about the cost has changed yet.
+
 **Why it is not fixed here.** The F9 brief was measurement only, and the fix is not local:
 the candidate search would need obstacle indexing (a spatial grid or an interval index
 rebuilt per annotation) to become sub-linear. That is a real change with a real risk of

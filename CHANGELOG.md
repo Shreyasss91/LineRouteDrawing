@@ -94,6 +94,68 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Added
 
+- **A byte-for-byte contract on annotation placement, before it is optimized (prerequisite
+  for F13).** [F13](documentation/findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels)
+  is a cost defect inside the collision check that decides where every callout and span
+  label goes. Fixing it means replacing an exhaustive scan with an index, and an index fails
+  silently: it never throws, it misses one obstacle, and the same project then exports a
+  different sheet. So the fix is gated on a stronger statement than "looks right" - every
+  automatic placement in all four baseline drawings must keep its identity, candidate,
+  centre, collision count and manual flag, byte for byte. This commit only builds the
+  measurement of that statement. **No production code changed**: `src/` is untouched.
+
+  **What was captured, and how.** `test/support/placement_capture.mjs` runs each drawing
+  through the real pipeline (`buildNetwork` -> `buildScene`) and writes one pipe-separated
+  line per placement record: kind, id, asset id, centre `x`/`y`, side, candidate index,
+  collision count, manual flag, font size, text, span endpoints and measured flag, the
+  leader's endpoints, and the arrowhead's tip and three points. The column order is in each
+  fixture's header. `test/fixtures/placement/{A-example,B-medium,C-large,D-surveyed}.txt`
+  were produced by that module running against the **unoptimized** implementation, which is
+  what makes them a contract instead of a snapshot of today's behaviour. Sizes run from
+  38 records / 4.8 kB (example) to 552 records / 81 kB (fully surveyed). The exports use a
+  different page frame, so their placements legitimately differ from the preview's; rather
+  than store four captures per drawing they are pinned by a sha256 digest per drawing in
+  `test/fixtures/placement/export-digests.json`, checked for `pdf`, `svg` and `print`.
+
+  **The oracle.** `test/support/exhaustive_collisions.mjs` keeps the pre-optimization scan
+  as a test-only module - every static obstacle, then every already-placed annotation, then
+  the frame test - and nothing under `src/` imports it. It imports production's `boxAround`
+  and `annotateCollides` rather than copying them, so only the loop is duplicated.
+  `placement_characterization.test.js` replays every captured collision count through it, so
+  the oracle cannot quietly drift from production geometry: if it did, the replay would fail
+  rather than agree with a wrong implementation.
+
+  **`test/collision_semantics.test.js` - 12 tests.** The clash rule pinned before anything
+  changes: disjoint, partly overlapping and wholly contained boxes; edges that touch exactly,
+  which do *not* clash at zero margin and do clash at any positive margin; a gap of exactly
+  the clearance versus one thousandth less; a clash counted per obstacle entry, so the same
+  obstacle listed twice counts twice and a bare box behaves like a `{box}` wrapper; accepted
+  annotations counted alongside static obstacles; the frame penalty stacking with a real
+  clash; negative coordinates; zero-height boxes, where the inclusive-edge rule makes a flat
+  box overlap nothing at zero clearance; overlap area as a ranking aid only; and the oracle
+  naming the indices it counted, not just how many.
+
+  **`test/placement_characterization.test.js` - 24 tests.** The capture compared byte for
+  byte per drawing; the export digests per drawing and profile; the oracle replay; record
+  integrity (unique identities, full columns); the annotated drawing's 50 callouts, 501 span
+  labels, 25 manual load offsets and 101 manual span offsets; two captures of the same
+  drawing being identical; and the notice being present in the preview and absent from the
+  exports. No test asserts a wall-clock duration.
+
+  **Validation.** `npm test` **564 tests in 35 files, 564 pass, 0 fail** (~2.3 s);
+  `npm run test:browser` **355/355 checks in 17 sections**; the link checker reports 0
+  problems. Because `src/` was not touched, the unoptimized implementation passes the new
+  contract by construction - which is the point: the fixtures describe what the code did
+  before anyone touched it.
+
+  Documentation: new [Testing §6](documentation/08-testing.md#6-annotation-placement-the-exact-output-contract)
+  section explaining the contract, the capture format, how to regenerate a fixture, and why
+  regenerating is never a way to make a build green; two new rows in the test-file table;
+  F13 in `findings.md` records that its measurement prerequisite has landed while the cost is
+  unchanged; counts updated everywhere (564 Node tests in 35 files).
+
+### Added
+
 - **A reproducible performance baseline for large drawings (closes finding F9).** The tool
   had no measurement beyond the bundled example's 34 nodes, so "is this slow?" could only
   be answered by impression. There are now two benchmark scripts over four fixed drawings,

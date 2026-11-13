@@ -12,7 +12,7 @@ says that too instead of guessing.
 Test evidence on the working tree that produced these documents:
 
 ```
-npm test               →  528 tests, 528 pass, 0 fail   (33 files)
+npm test               →  564 tests, 564 pass, 0 fail   (35 files)
 npm run test:browser   →  355/355 browser checks passed (17 sections)
 ```
 
@@ -44,7 +44,7 @@ npm run test:browser   →  355/355 browser checks passed (17 sections)
 → [Feature and validation matrix](09-feature-matrix.md) →
 [Known limitations §7](10-limitations.md#7-validation-status-by-area) →
 [Findings](findings.md). The short version: the domain layer is heavily tested
-(528 tests), the browser behaviour is checked end to end (355 checks), the drawing's cost
+(564 tests), the browser behaviour is checked end to end (355 checks), the drawing's cost
 is measured rather than guessed ([baseline](11-performance-baseline.md)), and the gaps are
 listed explicitly rather than glossed.
 

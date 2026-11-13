@@ -1,0 +1,39 @@
+# placement-capture v1
+# scene 552x752 padding=36
+# columns kind|id|assetId|centerX|centerY|side|candidateIndex|collisions|manual|fontSize|lines|a|b|measured|leader|arrow
+# callouts=0 spans=33 obstacles=76
+span|span:dst:route-1~mid:route-2:0|dst:route-1~mid:route-2:0|56|90|below|1|0|false|10|["— m"]|dst:route-1|mid:route-2:0|false||
+span|span:dst:route-1~origin|dst:route-1~origin|55|56|right|1|1|false|10|["— m"]|origin|dst:route-1|false||
+span|span:dst:route-2~mid:route-2:2|dst:route-2~mid:route-2:2|176|90|below|1|0|false|10|["— m"]|mid:route-2:2|dst:route-2|false||
+span|span:dst:route-2~mid:route-3:0|dst:route-2~mid:route-3:0|215|96|right|1|0|false|10|["— m"]|dst:route-2|mid:route-3:0|false||
+span|span:dst:route-3~mid:route-3:1|dst:route-3~mid:route-3:1|177|176|left|0|0|false|10|["— m"]|mid:route-3:1|dst:route-3|false||
+span|span:dst:route-3~mid:route-4:0|dst:route-3~mid:route-4:0|177|216|left|0|0|false|10|["— m"]|dst:route-3|mid:route-4:0|false||
+span|span:dst:route-4~dst:route-5|dst:route-4~dst:route-5|216|330|below|1|0|false|10|["— m"]|dst:route-4|dst:route-5|false||
+span|span:dst:route-4~mid:route-4:1|dst:route-4~mid:route-4:1|177|282|left-above|2|0|false|10|["— m"]|mid:route-4:1|dst:route-4|false||
+span|span:dst:route-4~mid:route-6:0|dst:route-4~mid:route-6:0|177|336|left|0|0|false|10|["— m"]|dst:route-4|mid:route-6:0|false||
+span|span:dst:route-4~mid:route-7:1|dst:route-4~mid:route-7:1|157|302|above-left|2|0|false|10|["— m"]|dst:route-4|mid:route-7:1|false||
+span|span:dst:route-5~mid:route-8:0|dst:route-5~mid:route-8:0|256|330|below|1|0|false|10|["— m"]|dst:route-5|mid:route-8:0|false||
+span|span:dst:route-5~mid:route-9:0|dst:route-5~mid:route-9:0|217|350|left-below|3|0|false|10|["— m"]|dst:route-5|mid:route-9:0|false||
+span|span:dst:route-6~mid:route-6:0|dst:route-6~mid:route-6:0|177|362|left-above|2|0|false|10|["— m"]|mid:route-6:0|dst:route-6|false||
+span|span:dst:route-7~mid:route-7:1|dst:route-7~mid:route-7:1|136|330|below|1|0|false|10|["— m"]|mid:route-7:1|dst:route-7|false||
+span|span:dst:route-8~mid:route-8:5|dst:route-8~mid:route-8:5|496|330|below|1|0|false|10|["— m"]|mid:route-8:5|dst:route-8|false||
+span|span:dst:route-9~mid:route-9:8|dst:route-9~mid:route-9:8|217|682|left-above|2|0|false|10|["— m"]|mid:route-9:8|dst:route-9|false||
+span|span:mid:route-2:0~mid:route-2:1|mid:route-2:0~mid:route-2:1|96|62|above|0|0|false|10|["— m"]|mid:route-2:0|mid:route-2:1|false||
+span|span:mid:route-2:1~mid:route-2:2|mid:route-2:1~mid:route-2:2|136|62|above|0|0|false|10|["— m"]|mid:route-2:1|mid:route-2:2|false||
+span|span:mid:route-3:0~mid:route-3:1|mid:route-3:0~mid:route-3:1|177|136|left|0|0|false|10|["— m"]|mid:route-3:0|mid:route-3:1|false||
+span|span:mid:route-4:0~mid:route-4:1|mid:route-4:0~mid:route-4:1|177|256|left|0|0|false|10|["— m"]|mid:route-4:0|mid:route-4:1|false||
+span|span:mid:route-8:0~mid:route-8:1|mid:route-8:0~mid:route-8:1|296|302|above|0|0|false|10|["— m"]|mid:route-8:0|mid:route-8:1|false||
+span|span:mid:route-8:1~mid:route-8:2|mid:route-8:1~mid:route-8:2|336|302|above|0|0|false|10|["— m"]|mid:route-8:1|mid:route-8:2|false||
+span|span:mid:route-8:2~mid:route-8:3|mid:route-8:2~mid:route-8:3|376|302|above|0|0|false|10|["— m"]|mid:route-8:2|mid:route-8:3|false||
+span|span:mid:route-8:3~mid:route-8:4|mid:route-8:3~mid:route-8:4|416|302|above|0|0|false|10|["— m"]|mid:route-8:3|mid:route-8:4|false||
+span|span:mid:route-8:4~mid:route-8:5|mid:route-8:4~mid:route-8:5|456|302|above|0|0|false|10|["— m"]|mid:route-8:4|mid:route-8:5|false||
+span|span:mid:route-9:0~mid:route-9:1|mid:route-9:0~mid:route-9:1|255|376|right|1|0|false|10|["— m"]|mid:route-9:0|mid:route-9:1|false||
+span|span:mid:route-9:1~mid:route-9:2|mid:route-9:1~mid:route-9:2|217|416|left|0|0|false|10|["— m"]|mid:route-9:1|mid:route-9:2|false||
+span|span:mid:route-9:2~mid:route-9:3|mid:route-9:2~mid:route-9:3|217|456|left|0|0|false|10|["— m"]|mid:route-9:2|mid:route-9:3|false||
+span|span:mid:route-9:3~mid:route-9:4|mid:route-9:3~mid:route-9:4|217|496|left|0|0|false|10|["— m"]|mid:route-9:3|mid:route-9:4|false||
+span|span:mid:route-9:4~mid:route-9:5|mid:route-9:4~mid:route-9:5|217|536|left|0|0|false|10|["— m"]|mid:route-9:4|mid:route-9:5|false||
+span|span:mid:route-9:5~mid:route-9:6|mid:route-9:5~mid:route-9:6|217|576|left|0|0|false|10|["— m"]|mid:route-9:5|mid:route-9:6|false||
+span|span:mid:route-9:6~mid:route-9:7|mid:route-9:6~mid:route-9:7|217|616|left|0|0|false|10|["— m"]|mid:route-9:6|mid:route-9:7|false||
+span|span:mid:route-9:7~mid:route-9:8|mid:route-9:7~mid:route-9:8|217|656|left|0|0|false|10|["— m"]|mid:route-9:7|mid:route-9:8|false||
+notice|notice:completeness||276|703|||||10|["Span measurements incomplete: 33 of 33 spans unmeasured."]|||||342 14 65 657 415 677
+completeness|{"total":33,"measured":0,"unmeasured":33}

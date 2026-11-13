@@ -4,15 +4,16 @@
 
 1. [Requirements](#1-requirements)
 2. [Commands](#2-commands)
-3. [The Node suite: 528 tests in 33 files](#3-the-node-suite-528-tests-in-33-files)
+3. [The Node suite: 564 tests in 35 files](#3-the-node-suite-564-tests-in-35-files)
 4. [The browser suite: 355 checks in 17 sections](#4-the-browser-suite-355-checks-in-17-sections)
 5. [The headed print smoke test](#5-the-headed-print-smoke-test)
-6. [Test strategy: what is tested and why](#6-test-strategy-what-is-tested-and-why)
-7. [Writing a new test](#7-writing-a-new-test)
-8. [Changing a tunable](#8-changing-a-tunable)
-9. [Working on the code: rules that keep the architecture intact](#9-working-on-the-code-rules-that-keep-the-architecture-intact)
-10. [Manual validation](#10-manual-validation)
-11. [Troubleshooting](#11-troubleshooting)
+6. [Annotation placement: the exact-output contract](#6-annotation-placement-the-exact-output-contract)
+7. [Test strategy: what is tested and why](#7-test-strategy-what-is-tested-and-why)
+8. [Writing a new test](#8-writing-a-new-test)
+9. [Changing a tunable](#9-changing-a-tunable)
+10. [Working on the code: rules that keep the architecture intact](#10-working-on-the-code-rules-that-keep-the-architecture-intact)
+11. [Manual validation](#11-manual-validation)
+12. [Troubleshooting](#12-troubleshooting)
 
 ---
 
@@ -31,15 +32,15 @@
 
 | Command | What it does | Expected result |
 | --- | --- | --- |
-| `npm test` | `node --test "test/*.test.js"` | **528 tests, 528 pass, 0 fail** |
+| `npm test` | `node --test "test/*.test.js"` | **564 tests, 564 pass, 0 fail** |
 | `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **355/355 checks pass** |
 | `npm run benchmark` | `node scripts/benchmark.mjs` — times the DOM-free phases on four fixed drawings | a table of medians and p95; **no pass/fail** |
 | `npm run benchmark:browser` | `node scripts/benchmark-browser.mjs` — drives the real page in Chrome | cold start and recompute timings; needs Playwright like the browser suite |
 | `npm run test:print:headed` | `node scripts/print-dialog-smoke.mjs` — opens a real print dialog | manual, needs an interactive terminal |
 | `npm run serve` | static server for manual use | serve locally, then open the printed URL |
 
-Verified on this working tree: `npm test` → `tests 528, pass 528, fail 0`; the suite
-takes about 1.2 s.
+Verified on this working tree: `npm test` → `tests 564, pass 564, fail 0`; the suite
+takes about 2.3 s.
 
 `npm run test:browser` requires the Playwright browser binaries. `test-browser.mjs`
 resolves Playwright at runtime (`loadPlaywright()`) and fails with a message naming the
@@ -48,7 +49,7 @@ install command if it is absent, rather than a stack trace.
 The browser suite writes its downloads and diagnostics into a temp directory; nothing
 it produces is committed.
 
-## 3. The Node suite: 528 tests in 33 files
+## 3. The Node suite: 564 tests in 35 files
 
 The whole domain layer is DOM-free, so it is tested directly under Node. Files and
 their test counts:
@@ -59,6 +60,8 @@ their test counts:
 | `benchmark_datasets.test.js` | 10 | The performance baseline's four datasets: the exact route/span/node/edge/load/measured-span counts the documentation quotes; every route within `MAX_ROUTE_SPANS`; every scenario building without errors; the chain really chaining (each `from` an endpoint that exists at that step) and totalling 501 spans; the medium dataset branching rather than being a shorter chain; the annotated dataset referring only to asset ids that are really drawn; every dataset being a complete openable project; and the scaling series being one span per route. **Counts only — no timing is asserted**, because a duration depends on the machine | Asset id forms, alias resolution, first-writer-wins, registry round trips, spans ↔ edges |
 | `schema_fields.test.js` | 14 | Unknown-field policy: the original `project.somethingNew` reproduction; unknown envelope, `metadata`, route (`spanns`), load and placement fields with their exact paths; dynamic asset-id maps accepting canonical ids, coordinate spellings and unknown ids; a v1/v2 document judged against its own contract while a v1 file carrying a v3 field is refused; a future version still refused for the version reason; all-or-nothing; the serializer's output accepted at all three versions; and the storage layer preserving the unreadable text |
 | `constraints.test.js` | 19 | The route and spacing policy: 500 accepted and 501 refused, an over-limit stored count grandfathered - **kept or reduced, never grown**, with every boundary of that rule as a table and a step-by-step walk from 648 down to 500 - clamping at both ends of the field, stored spacing below/above/inside the range described and never corrected, the verdict following an injected clearance requirement, and out-of-range projects (501 spans, 9 px, 300 px) opening unchanged through the parser, a save/reload and a v1 migration |
+| `collision_semantics.test.js` | 12 | The clash rule itself, pinned before anything is optimized: disjoint, partly overlapping and wholly contained boxes; edges that touch exactly (no clash at zero margin, a clash at any positive margin); a gap of exactly the clearance versus one thousandth less; a clash counted per obstacle entry so a duplicated obstacle counts twice, and a bare box treated like a wrapper; accepted annotations counted alongside static ones; the frame penalty stacking with a real clash; negative coordinates; zero-height boxes, where the inclusive-edge rule means a flat box overlaps nothing at zero clearance; overlap area as a ranking aid only; and the oracle naming the entries it counted |
+| `placement_characterization.test.js` | 24 | The exact-output contract for annotation placement, over the four performance-baseline drawings: the full capture (identity, chosen candidate, centre, collision count, manual flag, leader and arrowhead) compared byte for byte against fixtures recorded **from the unoptimized implementation**; the same for the three export profiles by digest; the exhaustive oracle re-deriving every recorded collision count, so the oracle cannot drift from production geometry unnoticed; record integrity (unique identities, complete columns); the annotated drawing's 50 callouts, 501 span labels, 25 manual load offsets and 101 manual span offsets; byte-identical repeat captures; and the notice present in the preview and absent from the exports. **No timing is asserted** |
 | `clearance.test.js` | 9 | Derived marker extents, `requiredSpanLength()` = 35, `requiredClearanceDistance()` = 33, the FPB-box-reaches-a-neighbour failure mode |
 | `designations.test.js` | 23 | `Origin:1` vs `A1` vs `TC:1`, per-source counters, branching continuation, never-reissued names, span en dash, reload agreement |
 | `export_visibility.test.js` | 11 | Exports hide `Origin`/letters, the switch overrides, the notice never exported, FPB text always drawn |
@@ -165,7 +168,65 @@ This is the path used for the **manual Chrome print-dialog validation of Letter
 landscape**, and the user carried out physical-printer validation separately. See
 [Known limitations](10-limitations.md#7-validation-status-by-area).
 
-## 6. Test strategy: what is tested and why
+## 6. Annotation placement: the exact-output contract
+
+Annotation placement is the one part of the drawing that is *chosen* rather than computed:
+each label takes the first candidate position that hits nothing, and the least-bad one when
+every candidate hits something. That makes it sensitive to the smallest change in the
+collision check — an obstacle that a faster search misses does not throw, it simply moves a
+label to the next candidate, and from then on the same project exports a different sheet.
+
+Finding [F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels)
+is a performance defect in that check, so it is fixed under a contract rather than a hope:
+
+> For all four performance-baseline drawings, every automatically placed annotation keeps
+> its identity, its chosen candidate, its exact centre, its collision count and its manual
+> flag. Byte for byte. A faster algorithm that moves one label is rejected.
+
+Three things make that checkable:
+
+**The capture.** `test/support/placement_capture.mjs` builds each drawing through the real
+pipeline (`buildNetwork` → `buildScene`) and serializes every placement record as one
+pipe-separated line: kind, id, asset id, centre x and y, side, candidate index, collision
+count, manual flag, font size, text lines, span endpoints and measured flag, the leader
+endpoints, and the arrowhead's tip and three points. The column order is written into each
+fixture's header, so a diff can be read without the source. The format is positional
+because a 501-span drawing is otherwise a quarter of a megabyte.
+
+**The fixtures.** `test/fixtures/placement/<dataset>.txt` holds those captures for
+`A-example`, `B-medium`, `C-large` and `D-surveyed`
+([11-performance-baseline.md §3](11-performance-baseline.md#3-the-datasets)). They were
+generated by running the capture against the **unoptimized** code, which is what makes them
+a contract instead of a snapshot. The export profiles use a different page frame, so their
+placements differ from the preview's by design; rather than store four captures per drawing
+they are pinned by a sha256 digest per drawing in
+`test/fixtures/placement/export-digests.json`, checked for `pdf`, `svg` and `print`.
+
+**The oracle.** `test/support/exhaustive_collisions.mjs` keeps the pre-optimization scan —
+every obstacle, every already-placed annotation, then the frame test — and nothing under
+`src/` imports it. It imports production's `boxAround` and `annotateCollides` rather than
+copying them, so only the loop is duplicated, and
+`placement_characterization.test.js` replays every captured collision count through it. If
+the oracle's geometry ever drifted from production, the replay fails instead of quietly
+agreeing.
+
+Regenerating a fixture is a deliberate act, and it is only legitimate when the *policy*
+changed on purpose:
+
+```bash
+node -e "import('./test/support/placement_capture.mjs').then(async (c) => {
+  const fs = await import('node:fs');
+  const { scenarios } = await import('./scripts/benchmark-datasets.mjs');
+  for (const s of scenarios()) {
+    fs.writeFileSync('test/fixtures/placement/' + s.name + '.txt', c.captureProject(s.project));
+  }
+});"
+```
+
+A diff in those files is a diff in what the tool draws. It is never a fixture to "update"
+to make a build green.
+
+## 7. Test strategy: what is tested and why
 
 The suite is organised around **contracts**, not around files:
 
@@ -187,7 +248,7 @@ The suite is organised around **contracts**, not around files:
    `geometry.test.js` pin the example drawing at 34 nodes / 33 edges / the endpoint
    set, so a change in the walk shows up immediately.
 6. **DOM-free by construction.** Nothing in `test/` loads a browser; nothing in
-   `src/geometry/` or `src/data/` needs one. This is why 528 tests run in ~1.9 s.
+   `src/geometry/` or `src/data/` needs one. This is why 564 tests run in ~2.3 s.
 
 ### Performance is measured, not guarded
 
@@ -203,7 +264,7 @@ the documentation's numbers become unattributable and the test says so; if the c
 slower, only a same-machine before/after comparison will show it, which is what the
 benchmark is for.
 
-## 7. Writing a new test
+## 8. Writing a new test
 
 ```js
 import test from 'node:test';
@@ -236,7 +297,7 @@ There is no test file for the UI beyond the browser suite: `app.js` and
 worth a unit test should be extracted into a DOM-free module instead (as
 `clearance.js`, `print.js`, `schedule_io.js` and `project.js` were).
 
-## 8. Changing a tunable
+## 9. Changing a tunable
 
 Every drawing dimension lives in `DEFAULT_CONFIG` in
 [src/config.js](../src/config.js). Because `requiredSpanLength()` is *derived* from
@@ -257,7 +318,7 @@ Do not add a second copy of a size in a renderer. If a renderer needs a dimensio
 reads `scene.config.*`; if a geometry module needs one, it takes `configOverrides` and
 calls `createConfig()`.
 
-## 9. Working on the code: rules that keep the architecture intact
+## 10. Working on the code: rules that keep the architecture intact
 
 These are the invariants the test suite and the module boundaries depend on
 ([Architecture §8](03-architecture.md#8-dependency-rules)):
@@ -299,7 +360,7 @@ The short version:
 4. Add the changelog entry, naming the commit. Every change counts, including a comment,
    a typo, a renamed test or a documentation-only edit.
 
-## 10. Manual validation
+## 11. Manual validation
 
 Automated coverage has limits. These are checked by hand and the result recorded here:
 
@@ -313,7 +374,7 @@ Automated coverage has limits. These are checked by hand and the result recorded
 | Very large drawings (hundreds of routes) | **Not validated** — no performance baseline |
 | Screen readers / keyboard-only operation of the preview canvas | **Not validated** |
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Symptom | Cause | Action |
 | --- | --- | --- |

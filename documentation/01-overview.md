@@ -140,7 +140,7 @@ had open (see [Persistence and project format](05-persistence.md)).
 ## Running the tests
 
 ```sh
-npm test                    # 528 Node tests, no dependencies required
+npm test                    # 564 Node tests, no dependencies required
 npm run test:browser        # 355 browser checks; needs Playwright + Chrome
 npm run test:print:headed   # manual print-dialog check; needs a real terminal
 ```
