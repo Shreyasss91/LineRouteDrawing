@@ -1080,19 +1080,75 @@ try {
     aliasRows.length === 1 && aliasRows[0].id === 'route-1',
     JSON.stringify(aliasRows.map((r) => r.id)),
   );
-  const aliasBefore = await readSavedProject(page);
+  // The parser canonicalises the accepted alias once, at the validation boundary
+  // (`validateMeasuredData` in src/ui/project.js), so every downstream consumer sees one
+  // spelling instead of each resolving aliases for itself. This is the fix for F11: the
+  // alias used to survive parsing verbatim, and because the schedule panel and annotation
+  // layer key on the raw `nodeId` the load was drawn as an orphan with no callout even
+  // though the file was valid.
+  const parsedAlias = await page.evaluate(async () => {
+    const { parseProjectJson } = await import('./src/ui/project.js');
+    const result = parseProjectJson(localStorage.getItem('line-route-drawing:v3:project'), {});
+    return result.ok ? { ok: true, loads: result.project.loads, warnings: result.warnings } : { ok: false };
+  });
   check(
-    'the load is valid and keeps its alias as its identifier',
-    aliasBefore?.loads?.length === 1 && aliasBefore.loads[0].nodeId === aliasFixture.alias,
-    JSON.stringify(aliasBefore?.loads),
+    'the alias is canonicalised at the validation boundary',
+    parsedAlias.ok === true &&
+      parsedAlias.loads?.length === 1 &&
+      parsedAlias.loads[0].nodeId === 'dst:route-1',
+    JSON.stringify(parsedAlias.loads),
   );
-  // NOTE: the annotation and schedule layers still key on the raw `nodeId`
-  // (`known.has(load.nodeId)` in network_panel.js), so an aliased load is shown as
-  // unresolved and not drawn even though the registry resolves it. That is a separate,
-  // pre-existing limitation of alias support OUTSIDE the parser, and it is out of scope
-  // here - this act only makes the TC-transition guard identity-correct. The check below
-  // therefore pins what this act guarantees: the load survives loading with its alias
-  // intact and the project remains openable. See findings F11.
+  check(
+    'canonicalising preserved the id, value and unit',
+    parsedAlias.loads?.[0]?.id === 'load-1' &&
+      parsedAlias.loads?.[0]?.value === 25 &&
+      parsedAlias.loads?.[0]?.unit === 'kVA',
+    JSON.stringify(parsedAlias.loads),
+  );
+  check(
+    'the canonicalised load raises no orphan warning',
+    Array.isArray(parsedAlias.warnings) && parsedAlias.warnings.length === 0,
+    JSON.stringify(parsedAlias.warnings),
+  );
+
+  // The consequences the user sees: the schedule panel recognises the point, and the
+  // callout is drawn at the destination instead of being dropped as unresolved.
+  await page.click('#tab-loads');
+  await page.waitForTimeout(300);
+  const aliasRow = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#load-rows tr')];
+    return rows.map((r) => ({
+      text: r.innerText.replace(/\s+/g, ' ').trim(),
+      unresolved: r.classList.contains('is-unresolved'),
+    }));
+  });
+  check(
+    'the schedule panel recognises the destination',
+    aliasRow.length === 1 && /dst:route-1/.test(aliasRow[0].text) && /pole/.test(aliasRow[0].text),
+    JSON.stringify(aliasRow),
+  );
+  check(
+    'the load is not marked unresolved',
+    aliasRow.length === 1 && aliasRow[0].unresolved === false,
+    JSON.stringify(aliasRow),
+  );
+  const aliasCallout = await page.evaluate(() => {
+    const svg = document.querySelector('#preview-canvas svg');
+    const group = svg.querySelector('[id="callout:dst:route-1"]');
+    return {
+      present: Boolean(group),
+      text: group ? group.textContent.trim() : null,
+      // The callout must sit where the destination actually is, not at the origin.
+      x: group?.querySelector('[data-anchor], text')?.getAttribute('x') ?? null,
+    };
+  });
+  check(
+    'the callout is drawn for the canonical destination',
+    aliasCallout.present === true && /25 kVA/.test(aliasCallout.text ?? ''),
+    JSON.stringify(aliasCallout),
+  );
+
+  const aliasBefore = await readSavedProject(page);
   const aliasResolves = await page.evaluate(async (alias) => {
     const { buildNetwork } = await import('./src/geometry/network.js');
     const { buildAssetRegistry, destinationAssetId } = await import('./src/geometry/assets.js');
@@ -1133,8 +1189,10 @@ try {
     aliasAfter?.routes?.[0]?.tc === false,
     JSON.stringify(aliasAfter?.routes?.[0]),
   );
+  // The refusal must not rewrite the stored load either: it is still exactly the record
+  // that was saved, alias and all. Only the parsed, in-app copy is canonical.
   check(
-    'the aliased load kept its id, alias, value and unit',
+    'the refusal left the stored load untouched',
     aliasAfter?.loads?.length === 1 &&
       aliasAfter.loads[0].id === 'load-1' &&
       aliasAfter.loads[0].nodeId === aliasFixture.alias &&
@@ -1170,6 +1228,40 @@ try {
     'the aliased project comes back unchanged',
     aliasReloadRows.length === 1 && aliasReloadRows[0].id === 'route-1',
     JSON.stringify(aliasReloadRows.map((r) => r.id)),
+  );
+
+  // The canonical id must survive a real write, not just an in-memory parse. Editing the
+  // load's value is enough to make the app persist its live state, and the stored nodeId
+  // must then be the canonical one - so reopening a saved-and-edited project no longer
+  // depends on the alias being resolvable a second time.
+  await page.click('#tab-loads');
+  await page.waitForTimeout(250);
+  const aliasValueInput = page.locator('#load-rows input[type=number]').first();
+  await aliasValueInput.fill('30');
+  await aliasValueInput.dispatchEvent('change');
+  await page.waitForTimeout(500);
+  const aliasPersisted = await readSavedProject(page);
+  check(
+    'the canonical node id is written on save',
+    aliasPersisted?.loads?.length === 1 &&
+      aliasPersisted.loads[0].nodeId === 'dst:route-1' &&
+      aliasPersisted.loads[0].value === 30,
+    JSON.stringify(aliasPersisted?.loads),
+  );
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg');
+  await page.waitForTimeout(600);
+  const aliasAfterSave = await readSavedProject(page);
+  check(
+    'the canonical node id survives the reload',
+    aliasAfterSave?.loads?.length === 1 && aliasAfterSave.loads[0].nodeId === 'dst:route-1',
+    JSON.stringify(aliasAfterSave?.loads),
+  );
+  check(
+    'the reloaded callout carries the edited value',
+    await page.evaluate(() =>
+      document.querySelector('#preview-canvas svg').textContent.includes('30 kVA'),
+    ),
   );
 
   /* ---------------- Dragging a callout ---------------- */

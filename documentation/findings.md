@@ -18,7 +18,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F8](#f8-appjs-is-a-1590-line-controller) | Maintainability | Low | Open |
 | [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | Open |
 | [F10](#f10-a-load-cannot-reach-a-tc-point-by-creation-move-edit-import-or-file) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — five guarded boundaries covering creation, move, route edit, import and file; fail-closed, each with executable evidence |
-| [F11](#f11-an-aliased-load-id-is-not-resolved-by-the-schedule-and-annotation-layers) | Alias identity handled inconsistently | Low | Open — recorded, not changed; the TC guard was made alias-aware |
+| [F11](#f11-an-aliased-load-id-is-not-resolved-by-the-schedule-and-annotation-layers) | Alias identity handled inconsistently | Low | **Closed** — aliases canonicalised once at the validation boundary |
 
 ---
 
@@ -386,8 +386,8 @@ defects in the application.
 
 ## F11 — An aliased load id is not resolved by the schedule and annotation layers
 
-**Status: open. Recorded, not changed.** Found while fixing the TC-transition guard
-(F10); it is a separate limitation and fixing it would be an unrelated change.
+**Status: closed.** Found while fixing the TC-transition guard (F10), then fixed in a
+separate act once the F10 work was committed and validated.
 
 **Observed.** A load's `nodeId` is normally the canonical asset id (`dst:route-6`), but
 the registry also accepts a **coordinate spelling** as an alias: `canonicalNodeId('0,-2')`
@@ -413,13 +413,34 @@ canonical id, so this is reachable only through a hand-edited or externally gene
 file. It is not zero, though — the parser accepts the file, which makes the resulting
 "orphan" report misleading rather than merely absent.
 
-**Not changed here.** Normalising aliases in the panel and annotation layers is a
-behavioural change to two subsystems, with its own risk of reclassifying records, and it
-is outside the TC-eligibility act. The TC guard itself *was* made alias-aware, because
-leaving it raw-string based left the data-loss defect open (see F10).
+**Fixed.** `validateMeasuredData()` in `src/ui/project.js` canonicalises each load's
+`nodeId` **once**, at the boundary where loads enter application state, using the registry
+it already builds for the eligibility check:
 
-**Suggested direction, if it is taken up.** Resolve once, at the boundary where loads
-enter application state, rather than comparing ids in each consumer. The parser already
-has the registry in hand (`validateMeasuredData`), so canonicalising `load.nodeId` there
-would make every downstream consumer correct at once, and the orphan warnings would then
-mean what they say.
+```js
+const validatedLoads = loads.map((load) => {
+  const canonical = registry.canonicalNodeId(load.nodeId);
+  return canonical === null ? load : { ...load, nodeId: canonical };
+});
+```
+
+Every downstream consumer — the schedule panel's `known.has(load.nodeId)`, the annotation
+layer's `callout:<nodeId>`, the reassignment picker, the saved project — now sees one
+spelling, so no consumer needed alias logic of its own. Only identifiers that **resolve**
+are rewritten: a genuinely unresolved reference keeps its exact text, so the existing
+reconciliation warning still fires and Reassign is still offered. `validatedLoads` holds new
+objects, so the caller's parsed JSON is not mutated. No schema version change: the stored
+contract is unchanged, and an alias file is simply read into canonical form.
+
+**Verified after the fix.** The same serializer-built project now parses to
+`{ id: 'load-1', nodeId: 'dst:route-1', value: 25, unit: 'kVA' }` with **no** orphan warning;
+the schedule panel shows `dst:route-1 pole` with no `is-unresolved` mark; the callout is
+drawn as `callout:dst:route-1` carrying `25 kVA`; and a real save writes the canonical id,
+which survives a reload. Projects that already use canonical ids are byte-identical, and a
+load pointing at `dst:gone` still reports *"belongs to points this drawing no longer has"*
+and keeps its spelling.
+
+**Why not teach each consumer.** Two subsystems (and the picker, and the exporter) all ask
+the same question. Fixing them individually means four implementations of one rule and four
+chances to disagree, which is exactly how this defect arose; normalising at the single
+entry point gives them nothing to disagree about.

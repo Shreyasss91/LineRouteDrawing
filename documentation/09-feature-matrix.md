@@ -86,6 +86,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Value must be `> 0` (zero refused) | Verified | `schedules.test.js` | Blank means "no load" |
 | Editing a load's value in place | Verified | `network_panel.js`, `schedules.test.js` | — |
 | Reassign an unresolved load | Verified | `schedules.test.js`, `reconcile.test.js` | Keeps id and value |
+| Aliased load `nodeId` canonicalised on read | Verified | `project.test.js` tests 23–29, browser §7 "the alias is canonicalised at the validation boundary" and four further checks | Normalised once in `validateMeasuredData()`, so the schedule panel recognises the point, the callout is drawn, and the canonical id is what a save writes. Unresolved ids keep their exact spelling and stay reconcilable; the caller's JSON is not mutated. **Closed F11** |
 | Span lengths, one per physical span | Verified | `schedules.test.js`, `schedule_io.test.js` | Keyed by span asset id |
 | Unmeasured span labelled `— m` | Verified | `browser` "an unmeasured span reads as a dash, never a zero", `annotations.test.js` | — |
 | Clearing a length means unmeasured, not zero | Verified | `schedules.test.js` | — |
@@ -186,7 +187,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | Runs fully offline from the local filesystem | Verified | No network requests in the source; jsPDF vendored | `file://` disables the clipboard fallback path |
 | Works from `npm run serve` | Verified | `scripts/serve.js`, used by `test-browser.mjs` | — |
-| Chromium (via Playwright) | Verified | 266 browser checks | — |
+| Chromium (via Playwright) | Verified | 274 browser checks | — |
 | Chrome, manually | Verified (manual) | Print-dialog validation | — |
 | Firefox | **Incomplete validation** | Nothing browser-specific in the source | Never run |
 | Safari / iOS | **Incomplete validation** | Nothing browser-specific | Never run |

@@ -135,7 +135,16 @@ id is a refusal (`BAD_LAYOUT`), not a silent fallback.
 | `unit` | string | required | must normalise through `normalizeUnit()`: `kVA`, `kW`, `kVAr`, `HP` |
 
 - `value` is written as a number, so `12.5` stays `12.5`.
-- A `nodeId` the drawing no longer has is **kept and warned about**, not refused.
+- An accepted **alias** in `nodeId` (a coordinate spelling such as `0,-2`, which the
+  registry resolves to `dst:route-1`) is **canonicalised on read**: the parsed project
+  holds the canonical id, so every downstream consumer sees one spelling. The spelling in
+  the *file* is never rewritten by reading it — only the in-memory project is
+  normalised — and the caller's parsed JSON is not mutated. See
+  [Identity and network data](06-identity-and-data.md#alias-handling-on-read).
+- A `nodeId` the drawing no longer has is **kept and warned about**, not refused, and keeps
+  its exact spelling so the user can see what it said and reassign it. Only identifiers
+  that **resolve** are canonicalised; an unresolved one is never deleted, nulled or
+  reidentified.
 - A TC point is not load-eligible (`isLoadEligible('tc') === false`). A file that names a
   TC point in `loads[].nodeId` is **refused** with `INELIGIBLE_LOAD_TARGET`; see below.
   [Identity and network data](06-identity-and-data.md#5-loads).

@@ -50,6 +50,35 @@ destination is reachable as `dst:route-2`, and if that point also received the l
 registry resolves every alias to one **canonical** id (`canonicalNodeId()`), using the
 first writer wins rule.
 
+Note the corollary, which matters for anything that asks "is this the same point?":
+**a route's destination id is not always a registered asset.** When two routes finish at
+the same coordinate only the earlier route's `dst:<routeId>` exists, so
+`canonicalNodeId('dst:<laterRoute>')` returns `null` while the route itself is perfectly
+valid. Ask by coordinate (`canonicalNodeId(coordKey(point))`) in that situation, or treat
+an unresolvable destination as unknown rather than as "different".
+
+### Alias handling on read
+
+Aliases are resolved **once**, where loads enter application state — in
+`validateMeasuredData()` (`src/ui/project.js`), which already builds the registry — not
+in each consumer. The parsed project therefore holds canonical ids, and the schedule
+panel, the annotation layer, the reassignment picker and the saved project all agree
+without any of them containing alias logic.
+
+Only identifiers that **resolve** are rewritten:
+
+| In the file | Parsed as | Why |
+| --- | --- | --- |
+| `dst:route-1` | `dst:route-1` | already canonical, unchanged |
+| `0,-2` (coordinate alias) | `dst:route-1` | resolves through the registry |
+| `dst:gone` | `dst:gone` | does not resolve — kept verbatim and warned about |
+
+An unresolved reference is never deleted, nulled or reidentified, because a broken
+reference is not an alias: it must stay legible so the user can reassign it, and the
+existing reconciliation warning must still fire
+([reconciliation](#8-reconciliation-when-the-drawing-changes)).
+The caller's parsed JSON is not mutated either — the loads array is rebuilt.
+
 ### Span asset ids
 
 ```
@@ -192,6 +221,7 @@ A load is `{id, nodeId, value, unit}` ([data/schedules.js](../src/data/schedules
 | Summation | **none, ever** |
 | Conversion | **none, ever** |
 | Several loads on one pole | one callout with one line per load (`loadCalloutLines()`) |
+| `nodeId` spelling | canonicalised on read ([above](#alias-handling-on-read)), so a coordinate alias is stored as the canonical id and still draws its callout |
 
 The absence of totals and conversions is a design decision, not an omission: a
 schedule of a mixed-unit installation is a list of what is *there*, and inventing a
@@ -276,8 +306,10 @@ X, and the spans meet them by name, not by coordinate.
 
 Rules:
 
-1. **A record is matched by asset id** (with alias resolution), never by designation,
-   position or index.
+1. **A record is matched by asset id**, never by designation, position or index. Alias
+   resolution has already happened by this point: records arrive from
+   `validateMeasuredData()` holding canonical ids, so a coordinate alias never reaches the
+   comparison as a raw string ([alias handling on read](#alias-handling-on-read)).
 2. **A record that matches nothing is reported, not dropped and not moved.** The
    number the user typed is their data.
 3. **A record is never attached to a lookalike.** If `A3` disappears and a new pole is

@@ -652,6 +652,26 @@ function validateMeasuredData(payload, network, problems) {
   for (const asset of registry.allNodeAssets()) liveNodes.add(asset.id);
   const liveSpans = new Set(registry.allSpanAssets().map((span) => span.id));
 
+  // ---- canonicalise accepted aliases, once, here ----
+  //
+  // A load's `nodeId` may legally be an accepted alias of a point rather than its asset
+  // id - a coordinate spelling like `0,-2`, for instance. The registry resolves those, but
+  // every downstream consumer compared the raw string, so such a load was drawn as an
+  // orphan with no callout even though the file was valid. Normalising at this boundary
+  // fixes all of them at once, rather than teaching each of the schedule panel, the
+  // annotation layer and the reassignment picker to resolve aliases independently.
+  //
+  // Only identifiers that RESOLVE are rewritten. A genuinely unresolved reference is left
+  // exactly as it was, so the existing reconciliation behaviour still reports it and the
+  // user can reassign it - a broken reference must not be mistaken for an alias, and must
+  // never be silently deleted, nulled or pointed somewhere convenient.
+  //
+  // `validatedLoads` contains new objects, so the caller's parsed JSON is not mutated.
+  const validatedLoads = loads.map((load) => {
+    const canonical = registry.canonicalNodeId(load.nodeId);
+    return canonical === null ? load : { ...load, nodeId: canonical };
+  });
+
   // ---- a load on a point that cannot carry one is fatal ----
   // Distinct from the orphan check below: an orphan points at a node that no longer
   // exists and is kept so the user can reassign it, but a TC point is alive and
@@ -659,7 +679,7 @@ function validateMeasuredData(payload, network, problems) {
   // Resolved through the registry, never by reading the id, so an alias or a
   // coordinate spelling cannot slip past it.
   const ineligible = [];
-  for (const load of loads) {
+  for (const load of validatedLoads) {
     const asset = registry.nodeAsset(registry.canonicalNodeId(load.nodeId) ?? load.nodeId);
     if (asset && isLoadEligible(asset.nodeType) === false) ineligible.push({ load, asset });
   }
@@ -678,7 +698,7 @@ function validateMeasuredData(payload, network, problems) {
     };
   }
 
-  const orphanLoads = loads.filter((load) => !liveNodes.has(load.nodeId));
+  const orphanLoads = validatedLoads.filter((load) => !liveNodes.has(load.nodeId));
   if (orphanLoads.length > 0) {
     warnings.push(
       `${orphanLoads.length} ${
@@ -697,7 +717,7 @@ function validateMeasuredData(payload, network, problems) {
 
   return {
     ok: true,
-    loads,
+    loads: validatedLoads,
     spanLengths,
     loadPlacements: loadPlacements.placements,
     spanPlacements: spanPlacements.placements,

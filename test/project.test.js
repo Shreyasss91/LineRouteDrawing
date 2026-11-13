@@ -27,6 +27,7 @@ import {
   toProjectPayload,
 } from '../src/ui/project.js';
 import { buildNetwork } from '../src/geometry/network.js';
+import { buildAssetRegistry } from '../src/geometry/assets.js';
 
 /** A project with both marker kinds and non-default settings. */
 function sampleProject() {
@@ -417,4 +418,150 @@ test('22. multiple TC and FPB destinations keep their identities', () => {
   const fpbIds = network.endpoints.filter((e) => e.kind === 'fpb').map((e) => e.id).sort();
   assert.deepEqual(tcIds, ['tc:1', 'tc:2']);
   assert.deepEqual(fpbIds, ['fpb:1', 'fpb:2']);
+});
+
+// ---------------------------------------------------------------------------
+// Load node identifiers are canonicalised once, at the validation boundary.
+//
+// A load may legally name its point with an accepted alias - most often the
+// coordinate spelling `0,-2` - rather than the asset id. The registry resolves
+// those (`canonicalNodeId`), but every downstream consumer compared the raw
+// string, so an aliased load was drawn as an orphan with no callout even though
+// the file was valid, and the schedule panel could not find its point.
+//
+// The fix normalises resolvable identifiers in `validateMeasuredData`, where the
+// registry is available, so every consumer sees one spelling. These tests pin
+// that boundary, including the two things it must NOT do: rewrite an identifier
+// that does not resolve, and mutate the caller's JSON.
+// ---------------------------------------------------------------------------
+
+/** A one-route project whose destination has a known coordinate alias. */
+function aliasFixture(loadNodeId) {
+  const routes = [{ id: 'route-1', from: 'origin', direction: 'south', spans: 2, tc: false, fpb: false }];
+  const project = {
+    routes,
+    originMarker: 'plain',
+    spanLength: 40,
+    layout: 'a4_landscape',
+    loads: [{ id: 'load-1', nodeId: loadNodeId, value: 25, unit: 'kVA' }],
+  };
+  return { routes, project };
+}
+
+test('23. a load named by a coordinate alias is stored under its canonical id', () => {
+  const { routes, project } = aliasFixture('0,-2');
+
+  // The premise, proved rather than assumed: `0,-2` really is a different
+  // spelling of the destination, and the registry really does resolve it.
+  const registry = buildAssetRegistry(buildNetwork(routes));
+  assert.equal(registry.canonicalNodeId('0,-2'), 'dst:route-1');
+  assert.notEqual('0,-2', 'dst:route-1');
+
+  const parsed = parseProjectJson(serializeProjectJson(project, { now: FIXED_DATE }));
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.project.loads, [
+    { id: 'load-1', nodeId: 'dst:route-1', value: 25, unit: 'kVA' },
+  ]);
+  // Nothing was lost on the way through.
+  assert.equal(parsed.project.loads[0].value, 25);
+  assert.equal(parsed.project.loads[0].unit, 'kVA');
+  assert.equal(parsed.project.loads[0].id, 'load-1');
+});
+
+test('24. the canonicalised load no longer looks like an orphan', () => {
+  // This is the user-visible consequence of test 23: the reconciliation pass
+  // compares against live node ids, so the alias used to be reported as missing.
+  const { routes, project } = aliasFixture('0,-2');
+  const parsed = parseProjectJson(serializeProjectJson(project, { now: FIXED_DATE }));
+  assert.equal(parsed.ok, true);
+
+  const liveNodes = new Set(buildAssetRegistry(buildNetwork(routes)).allNodeAssets().map((a) => a.id));
+  const orphanLoads = parsed.project.loads.filter((load) => !liveNodes.has(load.nodeId));
+  assert.deepEqual(orphanLoads, []);
+  assert.deepEqual(parsed.warnings, []);
+});
+
+test('25. an already-canonical identifier is left exactly as it was', () => {
+  const { project } = aliasFixture('dst:route-1');
+  const parsed = parseProjectJson(serializeProjectJson(project, { now: FIXED_DATE }));
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.project.loads, [
+    { id: 'load-1', nodeId: 'dst:route-1', value: 25, unit: 'kVA' },
+  ]);
+  assert.deepEqual(parsed.warnings, []);
+});
+
+test('26. an identifier that does not resolve is preserved verbatim', () => {
+  // A broken reference is not an alias. It must keep its exact spelling so the
+  // user can see what it said and reassign it - never be nulled, deleted, or
+  // quietly pointed at a nearby point.
+  const { project } = aliasFixture('dst:no-such-point');
+  const parsed = parseProjectJson(serializeProjectJson(project, { now: FIXED_DATE }));
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.project.loads, [
+    { id: 'load-1', nodeId: 'dst:no-such-point', value: 25, unit: 'kVA' },
+  ]);
+  // The existing reconciliation warning still fires.
+  assert.equal(parsed.warnings.length, 1);
+  assert.match(parsed.warnings[0], /belongs to points this drawing no longer has/);
+});
+
+test('27. canonicalising does not mutate the caller\'s parsed JSON', () => {
+  const { project } = aliasFixture('0,-2');
+  const text = serializeProjectJson(project, { now: FIXED_DATE });
+  const original = JSON.parse(text);
+  assert.equal(original.project.loads[0].nodeId, '0,-2');
+
+  const parsed = parseProjectJson(text);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.project.loads[0].nodeId, 'dst:route-1');
+  // The document the caller handed in is unchanged.
+  assert.equal(original.project.loads[0].nodeId, '0,-2');
+  assert.equal(JSON.parse(text).project.loads[0].nodeId, '0,-2');
+});
+
+test('28. the canonical id survives a save and reload', () => {
+  const { project } = aliasFixture('0,-2');
+  const first = parseProjectJson(serializeProjectJson(project, { now: FIXED_DATE }));
+  assert.equal(first.ok, true);
+  assert.equal(first.project.loads[0].nodeId, 'dst:route-1');
+
+  // Save what was parsed, then read it back: the canonical spelling is stable.
+  const second = parseProjectJson(
+    serializeProjectJson(
+      { ...project, loads: first.project.loads },
+      { now: FIXED_DATE },
+    ),
+  );
+  assert.equal(second.ok, true);
+  assert.deepEqual(second.project.loads, [
+    { id: 'load-1', nodeId: 'dst:route-1', value: 25, unit: 'kVA' },
+  ]);
+  assert.deepEqual(second.warnings, []);
+});
+
+test('29. an aliased load on a TC point is still refused', () => {
+  // Canonicalising must not soften the eligibility rule: the alias used to be
+  // judged by its raw text, now it is judged by what it resolves to, and a load
+  // on a TC point is fatal either way.
+  const routes = [{ id: 'route-1', from: 'origin', direction: 'south', spans: 2, tc: true, fpb: false }];
+  const registry = buildAssetRegistry(buildNetwork(routes));
+  const alias = registry.nodeKeys.get('dst:route-1');
+  assert.ok(alias, 'the destination has a coordinate spelling');
+  assert.equal(registry.canonicalNodeId(alias), 'dst:route-1');
+
+  const parsed = parseProjectJson(
+    serializeProjectJson(
+      {
+        routes,
+        originMarker: 'plain',
+        spanLength: 40,
+        layout: 'a4_landscape',
+        loads: [{ id: 'load-1', nodeId: alias, value: 25, unit: 'kVA' }],
+      },
+      { now: FIXED_DATE },
+    ),
+  );
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.code, 'INELIGIBLE_LOAD_TARGET');
 });

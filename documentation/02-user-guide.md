@@ -293,8 +293,10 @@ Form: `#field-load-node` (Point), `#field-load-value`, `#field-load-unit`
   | Schedule import planner (`parseNodeLoadImport`) | refuses the row during planning, before any plan exists; also refuses outright if it is not given both `lookupNode` and `isEligible`, since it could not verify anything | `bad-value` with a detail naming the TC rule; `missing-capability` for absent dependencies |
   | Route edit (`handleSubmit()`) | refuses to turn a loaded destination into a TC point before anything is written, naming the load. Compares **canonical node identity** through the registry, resolving the destination by asset id first and then by the coordinate its path ends on — so a load stored under a coordinate alias, or one sitting on a shared junction, still counts as attached. **Fails closed**: if the destination cannot be located the edit is refused rather than guessed at | form error: *"This route cannot be changed to a TC point while it carries a load…"*, or the retryable *"…its destination cannot be located in the drawing…"* |
 
-- All four resolve the target through the asset registry, so an aliased coordinate
-  spelling is judged by what it resolves to.
+- All five resolve the target through the asset registry, so an aliased coordinate
+  spelling is judged by what it resolves to. The parser goes one step further and
+  **rewrites** a resolvable alias to the canonical id, so the rest of the application only
+  ever sees one spelling; an identifier that does not resolve is kept exactly as written.
 - `insertLoadRecord()` and `insertReassignedLoad()` are the **unguarded** primitives
   beneath `addLoad()` and `reassignLoad()`. They do not check eligibility and are only
   for callers that already know the target is valid. No user-reachable action calls them

@@ -17,6 +17,45 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Fixed
 
+- **A load naming its point by an accepted alias was treated as an orphan and never
+  drawn.** The project parser accepted the file - `canonicalNodeId('0,-2')` resolves to
+  `dst:route-1` - but kept the spelling verbatim, while `src/ui/network_panel.js`
+  (`known.has(load.nodeId)`) and the annotation layer (`callout:<nodeId>`) compared that raw
+  string. So a valid load was reported as *"1 load belongs to points this drawing no longer
+  has"*, given no callout, and the schedule panel could not name its point. Reproduced with
+  a project built by the real serializer:
+
+  ```
+  routes: route-1 origin -> south, 2 spans   (destination at 0,-2)
+  load:   load-1 -> "0,-2", 25 kVA           (coordinate alias, not the asset id)
+
+  parseProjectJson -> ok: true, loads[0].nodeId === "0,-2"
+  schedule panel    -> "— (missing)  0,-2  —  load-1"   is-unresolved
+  callout:dst:route-1 -> absent;  "25 kVA" missing from the drawing
+  ```
+
+  Aliases are now canonicalised **once**, at the validation boundary
+  (`validateMeasuredData()` in `src/ui/project.js`), where the registry is already built:
+
+  ```js
+  const validatedLoads = loads.map((load) => {
+    const canonical = registry.canonicalNodeId(load.nodeId);
+    return canonical === null ? load : { ...load, nodeId: canonical };
+  });
+  ```
+
+  Every consumer - schedule panel, annotation layer, reassignment picker, exporter - sees
+  one spelling, so none of them needed alias logic of its own. Fixes finding **F11**.
+
+- Only identifiers that **resolve** are rewritten. A genuinely unresolved reference keeps
+  its exact spelling, still raises the reconciliation warning, and still offers Reassign -
+  a broken reference is not an alias, and is never deleted, nulled or reidentified.
+- `validatedLoads` holds new objects, so the caller's parsed JSON is not mutated. The
+  spelling stored in the *file* is untouched by reading it; only the in-memory project is
+  normalised. No schema version change - the serialised contract is unchanged.
+- An aliased load on a TC point is still refused with `INELIGIBLE_LOAD_TARGET`: the
+  eligibility rule now judges what the identifier resolves to, which it already did.
+
 - **The route-edit TC guard fell back to raw id equality, which was itself a data-loss
   path.** An earlier version resolved the destination's canonical id and, when that failed,
   compared raw identifiers instead. Identity here is first-writer-wins, so when two routes
@@ -43,6 +82,16 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Added
 
+- `test/project.test.js` 22 → 29 tests (23-29) covering the canonicalisation boundary:
+  alias normalised to the canonical id; already-canonical preserved; an unresolved
+  identifier kept verbatim with its warning; the caller's JSON unmutated; the canonical id
+  surviving a save/reload; and an aliased load on a TC point still refused.
+- Browser §7 reworked (14 → 19 checks) from "the alias survives verbatim" to the fixed
+  behaviour: canonicalised at the boundary, no orphan warning, the schedule panel showing
+  `dst:route-1 pole` with no `is-unresolved` mark, the `callout:dst:route-1` group present
+  with `25 kVA`, and the canonical id written by a real save and surviving a reload. The
+  route-edit refusal checks from the previous act are retained, as is the stored-file
+  assertion that a refusal does not rewrite the saved record.
 - Browser §6 extended with a **shared-junction** case (9 checks), suite 257 → 266. It
   proves the premise (the second route's destination is not its own asset id, and both
   destinations resolve to the same physical node), that a load on the shared node is found
@@ -59,11 +108,16 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Validation
 
-- `npm test` → 478 tests, 478 pass, 0 fail.
-- `npm run test:browser` → 266/266 checks passed, 14 sections (was 257/257).
-- Mutation: restoring id-only resolution with a raw-id fallback fails 3 checks, including
-  "the shared-node project is still openable" (`{"ok":false,"code":"INELIGIBLE_LOAD_TARGET"}`).
-  Source restored byte-for-byte; suites re-run green.
+- `npm test` → 485 tests, 485 pass, 0 fail.
+- `npm run test:browser` → 274/274 checks passed, 14 sections (was 257/257 before both acts).
+- Mutation (fail-closed guard): restoring id-only resolution with a raw-id fallback fails 3
+  checks, including "the shared-node project is still openable"
+  (`{"ok":false,"code":"INELIGIBLE_LOAD_TARGET"}`).
+- Mutation (canonicalisation): disabling it fails 4 Node tests and 8 browser checks,
+  reproducing the original symptoms exactly - orphan warning, `— (missing) 0,-2`, no
+  callout, alias written on save.
+- Mutation (unresolved handling): silently reidentifying an unresolved load fails test 26.
+- Both sources restored byte-for-byte (`cmp` clean); suites re-run green.
 
 ### Fixed
 
