@@ -2791,6 +2791,256 @@ try {
 
   /* ---------------- Console ---------------- */
 
+  section('Route and spacing limits');
+
+  // The form and the project parser used to disagree: the form refused a 501st span while
+  // the parser accepted it, and the form clamped spacing to 12-120 px while the parser
+  // accepted 8 px. Nothing said which was the policy. It is now one module
+  // (`src/data/constraints.js`) with one rule for each context:
+  //
+  //   - interactive input is bounded and refused or clamped before anything changes;
+  //   - stored values are NEVER rewritten. A file saved by an older build still opens,
+  //     keeps the numbers the user authored, and says what is outside the form's range.
+  //
+  // This section drives both halves through the real UI, because "the parser accepts it"
+  // and "the application copes with it" are different claims.
+
+  const limits = await page.evaluate(async () => {
+    const { requiredSpanLength } = await import('./src/geometry/clearance.js');
+    return { required: requiredSpanLength() };
+  });
+
+  /* ---------------- Interactive: the form refuses over the limit ---------------- */
+
+  await fresh(page, base);
+  await page.click('#btn-clear');
+  await page.waitForTimeout(250);
+
+  const rowsBeforeLimit = (await readRouteRows(page)).length;
+  await page.selectOption('#field-from', 'origin');
+  await page.selectOption('#field-direction', 'south');
+  await page.fill('#field-spans', '501');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(250);
+  const overLimitRefusal = await page.evaluate(() => {
+    const el = document.querySelector('#form-error');
+    return el ? el.textContent.trim() : null;
+  });
+  check(
+    'the form refuses a 501st span and says what the limit is',
+    /500 spans or fewer/.test(overLimitRefusal ?? ''),
+    String(overLimitRefusal),
+  );
+  check(
+    'a refused span count adds no route',
+    (await readRouteRows(page)).length === rowsBeforeLimit,
+    `${(await readRouteRows(page)).length} rows`,
+  );
+
+  // Exactly the limit is a normal route. It is built once, here, because it is the only
+  // place the boundary is exercised with a real network behind it.
+  await page.fill('#field-spans', '500');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(1200);
+  const atLimitSaved = await readSavedProject(page);
+  const atLimitRows = await readRouteRows(page);
+  check(
+    'exactly 500 spans is accepted and drawn',
+    atLimitRows.length === rowsBeforeLimit + 1 && atLimitSaved?.routes?.at(-1)?.spans === 500,
+    JSON.stringify(atLimitSaved?.routes?.map((r) => r.spans)),
+  );
+
+  /* ---------------- Stored: an over-limit project opens and is explained ---------------- */
+
+  // A project this build would not have let the user author: a 501-span route and a 9 px
+  // spacing. Both are legal in the file, neither may be rewritten on the way in.
+  const legacy = await page.evaluate(async () => {
+    const { serializeProjectJson } = await import('./src/ui/project.js');
+    return serializeProjectJson(
+      {
+        routes: [
+          { id: 'route-1', from: 'origin', direction: 'south', spans: 501, tc: false, fpb: false },
+        ],
+        originMarker: 'plain',
+        spanLength: 9,
+        layout: 'a4_landscape',
+        loads: [],
+        spanLengths: {},
+        loadPlacements: {},
+        spanPlacements: {},
+        nodeDesignations: {},
+      },
+      { savedAt: new Date('2026-01-01T00:00:00Z') },
+    );
+  });
+  await page.evaluate((doc) => {
+    localStorage.clear();
+    localStorage.setItem('line-route-drawing:v3:project', doc);
+  }, legacy);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg', { timeout: 20000 });
+  await page.waitForTimeout(600);
+
+  const readWarnings = () =>
+    page.evaluate(() => {
+      const read = (id) => {
+        const el = document.querySelector(id);
+        return el && !el.hidden ? el.textContent.trim() : null;
+      };
+      return {
+        route: read('#route-warning'),
+        spacing: read('#spacing-warning'),
+        banner: (document.body.innerText.match(/[^\n]*cannot be opened[^\n]*/i) ?? [null])[0],
+        spacingValue: document.querySelector('#field-spacing').value,
+        exportDisabled: document.querySelector('#btn-svg').disabled,
+        rowCount: document.querySelectorAll('#route-rows tr[data-id]').length,
+      };
+    });
+
+  const legacyState = await readWarnings();
+  const legacySaved = await readSavedProject(page);
+  check(
+    'an over-limit project opens instead of being refused',
+    legacyState.banner === null && legacyState.rowCount === 1,
+    JSON.stringify({ banner: legacyState.banner, rowCount: legacyState.rowCount }),
+  );
+  check(
+    'the stored span count is kept exactly as saved',
+    legacySaved?.routes?.[0]?.spans === 501,
+    JSON.stringify(legacySaved?.routes),
+  );
+  check(
+    'the over-limit route is named in the route warning',
+    /Route 1 has 501 spans/.test(legacyState.route ?? '') && /500/.test(legacyState.route ?? ''),
+    String(legacyState.route),
+  );
+  // The live clearance verdict owns this line while the spacing is too tight, and it is the
+  // stronger message: it names the problem and the value that will fix it. Either way the
+  // stored 9 px is still in the field and still in the file.
+  check(
+    'the stored spacing below the clearance requirement is kept and explained',
+    legacyState.spacingValue === '9' &&
+      /9 px/.test(legacyState.spacing ?? '') &&
+      new RegExp(`${limits.required} px`).test(legacyState.spacing ?? ''),
+    `${legacyState.spacingValue} / ${legacyState.spacing}`,
+  );
+  check(
+    'a drawing with too-tight spacing cannot be exported',
+    legacyState.exportDisabled === true,
+    String(legacyState.exportDisabled),
+  );
+
+  /* ---------------- Editing a grandfathered route keeps its count ---------------- */
+
+  // The over-limit count may be kept, because refusing every edit would force the user to
+  // shorten a route they only wanted to change the direction of. Only growth is refused.
+  await page.locator('#route-rows tr').first().locator('button[data-action="edit"]').click();
+  await page.waitForTimeout(200);
+  await page.selectOption('#field-direction', 'east');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(900);
+  const editedState = await readWarnings();
+  const editedSaved = await readSavedProject(page);
+  check(
+    'an over-limit route can be edited without shortening it first',
+    editedSaved?.routes?.[0]?.spans === 501 && editedState.banner === null,
+    JSON.stringify(editedSaved?.routes),
+  );
+  check(
+    'the saved project keeps the grandfathered span count',
+    editedSaved?.routes?.[0]?.spans === 501 && editedSaved?.routes?.[0]?.direction === 'east',
+    JSON.stringify(editedSaved?.routes?.[0]),
+  );
+  check(
+    'the route warning still explains the count after the edit',
+    /501 spans/.test(editedState.route ?? ''),
+    String(editedState.route),
+  );
+
+  // Typing into the spacing field is interactive, so it is brought into range - the one
+  // place clamping is the right answer, because the user just asked for that value.
+  await page.fill('#field-spacing', '8');
+  await page.dispatchEvent('#field-spacing', 'change');
+  await page.waitForTimeout(500);
+  const clampedState = await readWarnings();
+  check(
+    'a spacing typed into the field is brought up to the floor, not left at 8',
+    clampedState.spacingValue === '12',
+    String(clampedState.spacingValue),
+  );
+  // The floor is not the clearance requirement: 12 px is still too tight to draw, so the
+  // warning stays and export stays blocked. What changed is only the value the user typed.
+  check(
+    'the floor does not claim the drawing is now exportable',
+    clampedState.exportDisabled === true && clampedState.spacing !== null,
+    `disabled=${clampedState.exportDisabled} warning=${clampedState.spacing}`,
+  );
+
+  /* ---------------- Stored: the wide end of the field range ---------------- */
+
+  const wideSpacing = await page.evaluate(async () => {
+    const { serializeProjectJson } = await import('./src/ui/project.js');
+    return serializeProjectJson(
+      {
+        routes: [
+          { id: 'route-1', from: 'origin', direction: 'south', spans: 2, tc: false, fpb: false },
+        ],
+        originMarker: 'plain',
+        spanLength: 300,
+        layout: 'a4_landscape',
+        loads: [],
+        spanLengths: {},
+        loadPlacements: {},
+        spanPlacements: {},
+        nodeDesignations: {},
+      },
+      { savedAt: new Date('2026-01-01T00:00:00Z') },
+    );
+  });
+  await page.evaluate((doc) => {
+    localStorage.clear();
+    localStorage.setItem('line-route-drawing:v3:project', doc);
+  }, wideSpacing);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg', { timeout: 20000 });
+  await page.waitForTimeout(500);
+  const wideState = await readWarnings();
+  check(
+    'a spacing wider than the field opens and draws',
+    wideState.spacingValue === '300' && wideState.rowCount === 1,
+    `${wideState.spacingValue} / ${wideState.rowCount} rows`,
+  );
+  check(
+    'the field range is mentioned so the next edit is not a surprise',
+    /300 px/.test(wideState.spacing ?? '') && /120 px/.test(wideState.spacing ?? ''),
+    String(wideState.spacing),
+  );
+  check(
+    'a wide spacing does not withhold export, because it draws correctly',
+    wideState.exportDisabled === false,
+    String(wideState.exportDisabled),
+  );
+
+  await page.fill('#field-spacing', '400');
+  await page.dispatchEvent('#field-spacing', 'change');
+  await page.waitForTimeout(400);
+  const wideClamped = await readWarnings();
+  check(
+    'a typed spacing above the ceiling is brought down to it',
+    wideClamped.spacingValue === '120',
+    String(wideClamped.spacingValue),
+  );
+
+  /* ---------------- An ordinary project says nothing at all ---------------- */
+
+  await fresh(page, base);
+  const plainState = await readWarnings();
+  check(
+    'a project within the form range shows neither warning',
+    plainState.route === null && plainState.spacing === null,
+    JSON.stringify({ route: plainState.route, spacing: plainState.spacing }),
+  );
+
   section('Console');
 
   check('no uncaught errors reached the page', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));

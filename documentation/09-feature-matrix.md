@@ -37,7 +37,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Deleting a route leaves later identities stable | Verified | `route_identity.test.js` test 7, test 8 ("deleting a route leaves every other identity stable") | Deleting the **route** is the tested unit; deleting a row via the UI button is the same `state.routes.splice` path |
 | Deleting a branch leaves its records unresolved, not reassigned | Verified | `reconcile.test.js` tests 1, 4, 6, 7 | — |
 | Invalid rows are never dropped | Verified | `geometry.test.js` (forward reference and broken chain), `reconcile.test.js` test 7 | — |
-| Route span cap 500 | Verified | `app.js` `readForm()` | **UI-only**; the engine and file format accept any positive integer |
+| Route span cap 500 | Verified | `constraints.test.js` tests 2-4, `browser` §15 | **Interactive only.** The engine and the file format accept any positive integer; a longer route opens unchanged and is editable, with its count grandfathered (`src/data/constraints.js`). **Closed F1** |
 | Load / clear the example | Verified | `browser`, `integration.test.js` | — |
 
 ## 2. Marker kinds
@@ -173,7 +173,9 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Re-fit on window resize | Verified | `app.js` resize handler | Only when a drawing exists |
 | Three-way selection sync | Verified | `browser` §4 "the selected row is marked" and neighbours | By asset id |
 | Drawing reference panel | Verified | `mini_preview.test.js` (11), `browser` §4 | Read-only |
-| Spacing warning with the required value | Verified | `clearance.test.js`, `browser` | — |
+| Spacing warning with the required value | Verified | `clearance.test.js`, `browser` §15 | — |
+| Spacing field range 12-120 px, typed values only | Verified | `constraints.test.js` test 5, `browser` §15 | A stored spacing outside the range opens unchanged and is explained, never clamped. **Closed F1** |
+| Stored route/spacing values never rewritten on read | Verified | `constraints.test.js` tests 11-17, `browser` §15 | Refusals are for structure; out-of-range values are warnings. **Closed F1** |
 | Keyboard-only route entry | **Incomplete validation** | The form is native HTML, so tab/enter work; not tested | No dedicated keyboard test |
 | Keyboard operation of the preview canvas | **Unsupported** | — | Zoom/pan/select need a pointer |
 | Screen-reader support of the drawing | **Unsupported** | — | The SVG has no text alternative; the schedules are the accessible record |
@@ -188,7 +190,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | Runs fully offline from the local filesystem | Verified | No network requests in the source; jsPDF vendored | `file://` disables the clipboard fallback path |
 | Works from `npm run serve` | Verified | `scripts/serve.js`, used by `test-browser.mjs` | — |
-| Chromium (via Playwright) | Verified | 317 browser checks | — |
+| Chromium (via Playwright) | Verified | 335 browser checks | — |
 | Chrome, manually | Verified (manual) | Print-dialog validation | — |
 | Firefox | **Incomplete validation** | Nothing browser-specific in the source | Never run |
 | Safari / iOS | **Incomplete validation** | Nothing browser-specific | Never run |

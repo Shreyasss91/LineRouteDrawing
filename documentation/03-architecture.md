@@ -105,6 +105,7 @@ flowchart TD
         ANL["geometry/annotation_layer.js"]
         SCH["data/schedules.js"]
         SIO["data/schedule_io.js"]
+        CON["data/constraints.js"]
     end
 
     CFG["config.js — single source of tunables"]
@@ -182,6 +183,7 @@ Key properties:
 | [geometry/scene.js](../src/geometry/scene.js) | Builds the normalized pixel-space scene: lines, poles, TC, FPB, labels, annotations, metrics | network, profile, config overrides, measured data | scene object | config, network, assets, markers, annotation_layer, schedules |
 | [data/schedules.js](../src/data/schedules.js) | Load records and span-length measurements as pure data with validation; no totals, no conversions | loads/existing maps, raw values | new lists/maps, verdicts, callout lines | — |
 | [data/schedule_io.js](../src/data/schedule_io.js) | CSV/TSV parse and format, staged import plans, apply functions | text, current data, lookup functions | rows, plans `{added, updated, unchanged, removed, unresolved}`, refusal `{code, message, details}` | schedules |
+| [data/constraints.js](../src/data/constraints.js) | The route and spacing limits, in one place: interactive bounds versus stored values. Compares against an injected clearance requirement rather than importing geometry | span count, spacing, `{requiredSpacing}` | verdicts, clamped values, advisory messages | — |
 | [render/svg.js](../src/render/svg.js) | Scene → SVG string, editable primitives, escaping, X path, TC points | scene, options | SVG markup | markers |
 | [render/pdf.js](../src/render/pdf.js) | Scene → jsPDF vector document; fit-to-page transform | scene, `{jsPDF, layout, margin, compress}` | `{doc, fit, layout, primitives}` | config, svg |
 | [render/print.js](../src/render/print.js) | Fit a scene onto one sheet of a layout, aspect preserved | scene size, layout, margin mm | `{widthMm, heightMm, scale, boxWidthMm, boxHeightMm}` | config |

@@ -17,6 +17,41 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Fixed
 
+- **The form and the project parser disagreed on two limits, and nothing said which was
+  the policy (finding F1).** The form refused a 501st span while the parser accepted it,
+  and the form clamped spacing to 12-120 px while the parser accepted 8 px. The numbers
+  were literals in two files, free to drift again.
+
+  Neither side was simply wrong, so the fix is not to make one match the other. The two
+  contexts are now defined separately in one DOM-free module, `src/data/constraints.js`:
+
+  | | Interactive input (the form) | Stored values (a project file) |
+  | --- | --- | --- |
+  | Spans per route | whole number 1...500; 501 refused before anything changes | any whole number >= 1 opens and is drawn unchanged; > 500 is reported |
+  | Editing a route over 500 | - | **grandfathered**: the count may be kept, may not grow |
+  | Span spacing | clamped into 12...120 on entry | any finite value > 0 opens and is drawn unchanged; outside the range or below the clearance requirement, it is reported |
+
+  Capping the parser would have made previously openable files unopenable, which is data
+  loss by policy: a file records what someone authored, and a later build narrowing a form
+  field must not rewrite it. So nothing is clamped, rounded or dropped on the way in.
+
+  Grandfathering exists because refusing every edit to an over-limit route would trap the
+  user: changing its direction, its marker or its starting point would all require first
+  shortening a route they did not mean to touch. `checkRouteSpanCount(spans, {
+  existingSpans })` accepts the existing count and refuses only growth - the edit that
+  actually crosses the line.
+
+  The module is geometry-free: the clearance minimum is passed in from
+  `requiredSpanLength()` rather than imported or restated, so the real marker geometry
+  stays the only source of the tightness rule and this module only compares against it.
+
+  What the user sees, above the drawing and each carrying one concern:
+  `#spacing-warning` (unchanged for the tight case, now also used for a stored spacing
+  *wider* than the field accepts - 300 px draws correctly and only the field disagrees) and
+  the new `#route-warning`, which names the row, its count and the 500 limit. The parser
+  reports the same conditions through `parseProjectJson(...).warnings`, so a headless
+  consumer is told too. No schema version changed, because the persisted format did not.
+
 - **The completeness notice swallowed presses meant for the labels under it (finding
   F12).** While a survey is incomplete the renderer appends an `#notice` group after
   `#load-callouts` and `#span-lengths`, carrying a filled white rectangle. Painting last is
@@ -110,6 +145,21 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Added
 
+- `test/constraints.test.js` - 17 tests, Node suite 485 -> 502 in 31 files. The limit
+  values; 500 accepted and 501 refused; a grandfathered 648 kept, 649 refused, a new 648
+  refused and 648 -> 500 ordinary again; clamping at the floor, the ceiling, rounding and
+  non-numeric input; stored spacing below, above and inside the range; the spacing verdict
+  following an injected requirement (35 vs 50 for the same 40 px project); over-long routes
+  named by row; and, through the real parser and serializer, a 501-span and a 9 px project
+  opening unchanged, a 300 px project opening unchanged, an in-range project saying
+  nothing, a save/reload that does not drift, and a version-1 document keeping its
+  out-of-range values through every migration step.
+- Browser §15 "Route and spacing limits" (18 checks), suite 317 -> 335 in 16 sections. The
+  form refusing 501 and accepting 500; a 501-span / 9 px project opening with no recovery
+  banner, both values intact, both warnings shown and export withheld; editing that route's
+  direction **without shortening it**, with 501 still in the saved file; typing 8 and
+  getting 12; a 300 px project opening, being explained and **not** withholding export;
+  typing 400 and getting 120; and an ordinary project showing neither line.
 - Browser §9 "The incomplete-measurement notice does not block labels" (17 checks), suite
   298 → 317. It parks a real callout under the notice band with a real drag, then proves
   the band no longer takes the press: the notice is drawn and has `pointer-events: none`;
@@ -151,13 +201,19 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Verification
 
+- **The limits fix is proved by mutation, in both directions.** Removing the grandfathering
+  (`if (overLimit)` instead of `if (overLimit && spans !== existingSpans)`) fails Node test
+  4 and the browser check *the saved project keeps the grandfathered span count*. Clamping
+  the stored spacing inside the parser (`Math.min(120, Math.max(12, spanLength))`) fails 4
+  Node tests and 3 browser checks. `src/data/constraints.js` and `src/ui/project.js` were
+  each restored byte-for-byte (`cmp` clean) and the suites re-run green.
 - **The notice fix is proved by mutation.** Restoring `<g id="notice">` without the
   attribute fails **5** of the 17 new checks, including `the notice no longer takes the
   hit`, `the covered label is still grabbable`, `dragging a label under the notice records
   a manual offset` and `the covered label follows the pointer`; `src/render/svg.js` was
   restored byte-for-byte afterwards (`cmp` clean) and the suite re-run green.
-- Full runs in this state: `npm test` **485/485 Node tests in 30 files**;
-  `npm run test:browser` **317/317 checks in 15 sections**; documentation links 318 in 15
+- Full runs in this state: `npm test` **502/502 Node tests in 31 files**;
+  `npm run test:browser` **335/335 checks in 16 sections**; documentation links 322 in 15
   files with 0 problems; code fences balanced.
 - Deliberate behaviour recorded rather than changed: the preview also draws `#hit-areas`
   last with `pointer-events: all`, because pressing a pole selects it. A label dragged on

@@ -15,7 +15,7 @@ writing this documentation are in [findings.md](findings.md).
 7. [Validation status by area](#7-validation-status-by-area)
 8. [Accessibility and input limits](#8-accessibility-and-input-limits)
 9. [Data interchange limits](#9-data-interchange-limits)
-10. [Form and model disagree in two places](#10-form-and-model-disagree-in-two-places)
+10. [Form and file differ by design, and now say so](#10-form-and-file-differ-by-design-and-now-say-so)
 
 ---
 
@@ -136,9 +136,9 @@ not been demonstrated.
 
 ### Verified automatically
 
-- The whole domain layer: **485 Node tests across 30 files**, all passing on the
+- The whole domain layer: **502 Node tests across 31 files**, all passing on the
   current working tree.
-- The application in a real browser: **317 checks in 15 sections**, all passing,
+- The application in a real browser: **335 checks in 16 sections**, all passing,
   including one-page print fit for **all four layouts** and the TC geometry on the
   printed sheet.
 
@@ -197,19 +197,28 @@ not been demonstrated.
 | One project per browser | A second project replaces the first in `localStorage`; keeping several means keeping several files |
 | Clipboard fallback | On `file://` the async clipboard API is unavailable, so the tool falls back to `document.execCommand('copy')`; if even that fails the status line tells you to use **Export CSV** |
 
-## 10. Form and model disagree in two places
+## 10. Form and file differ by design, and now say so
 
-Two limits exist **only in the form**, and a project file can legitimately exceed
-them. This is a deliberate asymmetry, but it has consequences.
+The **form** and a **project file** are judged differently on purpose. A form entry is an
+instruction being given now, so it is bounded and refused; a file is a record of what
+someone already authored, so it is opened and drawn as written and reported rather than
+silently corrected. This used to be an undocumented consequence of two pairs of numbers in
+two files ([F1](findings.md#f1-the-form-and-the-project-parser-disagreed-on-documented-limits));
+it is now one policy module, `src/data/constraints.js`, with one rule per context.
 
-| Limit | Form | Engine / file format | Consequence |
+| Limit | Interactive (form) | Stored (file) | What the user sees |
 | --- | --- | --- | --- |
-| Spans per route | 500 max ("Use 500 spans or fewer for one route.") | Any integer > 0 | A hand-edited project file can contain a 10 000-span route, and it will be drawn. The form will refuse to create one, and editing that row is awkward |
-| Span spacing | Clamped to 12…120 px on `change`, and the input's `min` is set at boot to `requiredSpanLength()` (35) | Any positive finite number | A file with spacing 8 opens, shows the tight-spacing warning and disables export. A file with spacing 400 opens and exports fine |
+| Spans per route | whole number 1…500; 501 is refused with "Use 500 spans or fewer for one route." | any whole number ≥ 1 is opened and drawn | above 500, the `#route-warning` line names the row and the count |
+| Editing a route over 500 | — | **grandfathered**: the count may be kept and may not grow | the warning stays until the route is shortened |
+| Span spacing | clamped into 12…120 px on entry | any finite value > 0 is opened and drawn, never clamped | below `requiredSpanLength()` (35 px): the tight-spacing warning and export disabled; above 120: the field range is explained, export unaffected |
 
-Both are safe (the engine and the loaders validate independently) but they mean **the
-file format is the more capable interface**. Documented rather than harmonised, because
-changing either side would be a behaviour change, not a documentation fix.
+The floor of 12 px is a field range, not a clearance rule — anything between 12 and 34 px
+is accepted, warns and cannot be exported. The clearance rule itself is still
+`requiredSpanLength()`; the policy module receives it rather than restating it.
+
+The consequence is unchanged in spirit: **the file format remains the more capable
+interface**. What changed is that exceeding it is now explained in the drawing, in the
+places an operator looks; nothing is clamped, rounded or dropped on the way in.
 
 ## 11. Smaller limits worth knowing
 

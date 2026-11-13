@@ -23,6 +23,13 @@ import {
 } from './mini_preview.js';
 import { checkSpanClearance, requiredSpanLength } from '../geometry/clearance.js';
 import {
+  MAX_SPAN_SPACING,
+  checkRouteSpanCount,
+  clampSpanSpacing,
+  describeStoredRouteLimits,
+  describeStoredSpacingLimits,
+} from '../data/constraints.js';
+import {
   parseProjectJson,
   projectFileName,
   sameAuthoredProject,
@@ -47,10 +54,8 @@ const DIRECTIONS = ['north', 'south', 'east', 'west'];
 function nextRouteIdValue() {
   return createRoute({}).id;
 }
-const MIN_SPACING = 12;
 /** Smallest spacing at which the marker symbols keep their clearance. */
 const REQUIRED_SPACING = requiredSpanLength();
-const MAX_SPACING = 120;
 const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 6;
 
@@ -65,6 +70,7 @@ const dom = {
   fpb: el('field-fpb'),
   originMarker: el('field-origin-marker'),
   spacingWarning: el('spacing-warning'),
+  routeWarning: el('route-warning'),
   persistenceNotice: el('persistence-notice'),
   recoveryBar: el('recovery-bar'),
   recoveryText: el('recovery-text'),
@@ -992,6 +998,7 @@ function updateOutputButtons() {
     }
   }
   showSpacingWarning(spacing);
+  showRouteWarning();
 }
 
 /**
@@ -1003,6 +1010,19 @@ function updateOutputButtons() {
 function showSpacingWarning(spacing) {
   if (!dom.spacingWarning) return;
   if (spacing.ok) {
+    // The spacing draws fine, but it may still be outside the range the field holds: a
+    // project saved with a 300 px spacing opens and draws, and the field would bring it
+    // back to 120 on the first change. Say so, rather than letting that change surprise
+    // the user - and say nothing at all when everything is in range.
+    const stored = describeStoredSpacingLimits(state.spanLength, {
+      requiredSpacing: REQUIRED_SPACING,
+    });
+    if (stored.length > 0) {
+      dom.spacingWarning.hidden = false;
+      dom.spacingWarning.textContent = stored.join(' ');
+      dom.spacingWarning.removeAttribute('data-required');
+      return;
+    }
     dom.spacingWarning.hidden = true;
     dom.spacingWarning.textContent = '';
     dom.spacingWarning.removeAttribute('data-required');
@@ -1011,6 +1031,25 @@ function showSpacingWarning(spacing) {
   dom.spacingWarning.hidden = false;
   dom.spacingWarning.textContent = spacing.message;
   dom.spacingWarning.setAttribute('data-required', String(spacing.required));
+}
+
+/**
+ * Show the routes whose span count the form would not accept, or clear the line.
+ *
+ * Nothing is rewritten: the route keeps the count it was saved with, and the drawing
+ * carries on using it. The message names the route, the count, the limit and the one
+ * action available - shorten it, which is a deliberate edit rather than a silent one.
+ */
+function showRouteWarning() {
+  if (!dom.routeWarning) return;
+  const messages = describeStoredRouteLimits(state.routes);
+  if (messages.length === 0) {
+    dom.routeWarning.hidden = true;
+    dom.routeWarning.textContent = '';
+    return;
+  }
+  dom.routeWarning.hidden = false;
+  dom.routeWarning.textContent = messages.join(' ');
 }
 
 /* ------------------------------------------------------------------ */
@@ -1068,11 +1107,15 @@ function readForm() {
   if (!Number.isInteger(spans)) {
     return { error: 'Spans must be a whole number (no decimals).' };
   }
-  if (spans <= 0) {
-    return { error: 'Spans must be greater than zero.' };
-  }
-  if (spans > 500) {
-    return { error: 'Use 500 spans or fewer for one route.' };
+  // A route read from a file may already be longer than the form allows. That count is
+  // grandfathered - see checkRouteSpanCount() - so editing such a route does not force the
+  // user to shorten it before they can change anything else.
+  const editing = state.selectedId
+    ? state.routes.find((r) => r.id === state.selectedId)
+    : null;
+  const spanVerdict = checkRouteSpanCount(spans, { existingSpans: editing?.spans ?? null });
+  if (!spanVerdict.ok) {
+    return { error: spanVerdict.message };
   }
   if (!DIRECTIONS.includes(dom.direction.value)) {
     return { error: 'Choose a direction: North, South, East or West.' };
@@ -1590,9 +1633,10 @@ function setupEventListeners() {
   });
 
   dom.spacing.addEventListener('change', () => {
-    const value = Number(dom.spacing.value);
-    if (!Number.isFinite(value)) return;
-    const clamped = Math.min(MAX_SPACING, Math.max(MIN_SPACING, Math.round(value)));
+    // Only a value the user has just typed is brought into range. A value read from a
+    // project is never clamped: that would rewrite their data without asking.
+    const clamped = clampSpanSpacing(dom.spacing.value);
+    if (clamped === null) return;
     dom.spacing.value = String(clamped);
     state.spanLength = clamped;
     refresh({ refit: true });
@@ -1665,6 +1709,7 @@ function boot() {
 
   dom.spacing.value = String(state.spanLength);
   dom.spacing.min = String(REQUIRED_SPACING);
+  dom.spacing.max = String(MAX_SPAN_SPACING);
   dom.layout.value = state.layout;
   dom.originMarker.value = state.originMarker;
   refresh();

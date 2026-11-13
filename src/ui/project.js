@@ -15,6 +15,8 @@
 import { DIRECTIONS, PAGE_LAYOUTS } from '../config.js';
 import { buildNetwork, normalizeMarkerKind } from '../geometry/network.js';
 import * as assetModule from '../geometry/assets.js';
+import { requiredSpanLength } from '../geometry/clearance.js';
+import { describeStoredLimits } from '../data/constraints.js';
 import { isLoadEligible, normalizeUnit } from '../data/schedules.js';
 
 /** Identifies a file as a project for this tool. */
@@ -714,6 +716,18 @@ function validateMeasuredData(payload, network, problems) {
       } to spans this drawing no longer has. They are kept and can be reassigned.`,
     );
   }
+
+  // Values outside the range the form would accept. Reported, never corrected: a
+  // project saved by an older build - or by one with looser limits - has to keep opening,
+  // and the numbers the user authored have to survive until they choose to change them.
+  // The parser therefore only *describes* them; `assertCompatibleLimits` below covers
+  // the one case where a stored value cannot be honoured at all.
+  warnings.push(
+    ...describeStoredLimits(
+      { routes: payload.routes ?? [], spanLength: payload.spanLength },
+      { requiredSpacing: requiredSpanLength() },
+    ),
+  );
 
   return {
     ok: true,

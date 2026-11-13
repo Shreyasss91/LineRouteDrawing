@@ -340,7 +340,7 @@ once and never changes the topology.
 | Value | Where |
 | --- | --- |
 | default | `DEFAULT_CONFIG.spanLength = 40` px |
-| UI clamp | `MIN_SPACING = 12` … `MAX_SPACING = 120` |
+| UI clamp (typed values only) | `MIN_SPAN_SPACING = 12` … `MAX_SPAN_SPACING = 120`, from `src/data/constraints.js` |
 | minimum workable | `requiredSpanLength()` = **35** px (shipped config) |
 | symbols-touching limit | `requiredClearanceDistance()` = **33** px |
 

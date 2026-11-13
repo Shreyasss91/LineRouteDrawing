@@ -8,7 +8,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 
 | ID | Area | Severity | Status |
 | --- | --- | --- | --- |
-| [F1](#f1-the-form-and-the-project-parser-disagree-on-documented-limits) | Form vs. parser limits | Low | Open — documented, not changed |
+| [F1](#f1-the-form-and-the-project-parser-disagreed-on-documented-limits) | Form vs. parser limits | Low | **Closed** — one policy module, 17 Node + 18 browser checks |
 | [F2](#f2-an-edited-route-is-now-covered-by-a-browser-test) | Untested UI path | Medium | **Closed** — 32 browser checks exercise the edit form |
 | [F3](#f3-drag-at-zoom-is-verified-against-the-stored-scene-offset) | Untested UI behaviour | Low | **Closed** — drag verified at three zoom levels against the stored scene offset |
 | [F4](#f4-the-static-spacing-minimum-in-the-markup-is-stale) | Stale literal | Low | Open |
@@ -23,33 +23,88 @@ Severity is about what a user or maintainer would experience, not about code sty
 
 ---
 
-## F1 — The form and the project parser disagree on documented limits
+## F1 — The form and the project parser disagreed on documented limits
 
-**Observed.** Two limits enforced by the **form** are not enforced by the **project
-parser**:
+**Status: closed.** Both limits now come from one DOM-free policy module
+(`src/data/constraints.js`), and the two contexts they serve are stated explicitly instead
+of being left to disagree.
 
-| Limit | Form | Parser |
+**Observed originally.** Two limits enforced by the **form** were not enforced by the
+**project parser**:
+
+| Limit | Form (before) | Parser (before) |
 | --- | --- | --- |
-| Spans per route | 500 max (`app.js:1074`) | accepts 501 (verified: `parseProjectJson` returns `ok: true`) |
-| Span spacing | clamped 12…120 px (and `min` = 35 at boot) | accepts `spanLength: 8` (verified: `ok: true`, value `8`) |
+| Spans per route | 500 max (`app.js`, a literal in `readForm()`) | accepted 501 |
+| Span spacing | clamped 12…120 px (a second pair of literals) | accepted `spanLength: 8` |
 
-Both are safe because the engine is independent, but the asymmetry is real.
+Nothing in the repository said which was the policy. Both tolerated cases were safe,
+because the engine is independent of the file, but a hand-edited or externally generated
+project could produce a drawing the UI could not comfortably edit — and the numbers lived
+in two files that were free to drift again.
 
-**Impact.** A hand-edited or externally generated project can create a drawing that the
-UI cannot reproduce or comfortably edit. A spacing of 8 opens into a drawing with the
-tight-spacing warning and export disabled, which is correct but may surprise.
+**Why the answer is not "cap the parser".** Adding parser caps would make previously
+openable files unopenable. A file is a record of what someone authored, and refusing it
+because a later build narrowed a form field is data loss by policy. So the two contexts are
+now defined separately, and deliberately:
 
-**Why it was not changed.** Enforcing the form's caps in the parser would make
-previously-openable files unopenable — a behaviour change, not a documentation fix.
+| | Interactive input (the form) | Stored values (a project file) |
+| --- | --- | --- |
+| Spans per route | whole number, 1…500; 501 refused before anything changes | any whole number ≥ 1 is opened and drawn unchanged; > 500 is reported |
+| Editing a route over 500 | — | **grandfathered**: the count may be kept, and may not grow |
+| Span spacing | clamped into 12…120 on entry | any finite value > 0 is opened and drawn unchanged; outside the range or below the clearance requirement, it is reported |
+| Spacing below `requiredSpanLength()` (35 px) | accepted with the clearance warning and export disabled | same verdict, and the message names the value that will fix it |
 
-**Suggested decision.** Either (a) document the file format as the more permissive
-interface (done in [Known limitations §10](10-limitations.md#10-form-and-model-disagree-in-two-places)),
-or (b) add parser-level caps as a separate, tested change with a migration note.
+**How the two are kept from drifting.** `src/data/constraints.js` owns `MAX_ROUTE_SPANS`,
+`MIN_SPAN_SPACING`, `MAX_SPAN_SPACING`, `checkRouteSpanCount()`, `clampSpanSpacing()` and
+the `describeStored*Limits()` reporters. It is DOM-free and geometry-free: the clearance
+minimum is *passed in* from `requiredSpanLength()` rather than imported or restated, so
+the real marker geometry remains the only source of the tightness rule and this module
+only compares against it.
 
-**Related documentation correction.** While checking this, the claim that the parser
-accepts direction *labels* (`"South"`) proved **false** — `VALID_DIRECTIONS` holds only
-the lowercase keys, and a file containing `"South"` is refused with `INVALID_ROUTES`.
-Verified. All documentation now states keys only.
+**Grandfathering, and why it matters.** A route read from a file may already exceed 500
+spans. Refusing every edit to it would trap the user: changing its direction, its marker
+or its starting point would all require first shortening a route they did not mean to
+touch. `checkRouteSpanCount(spans, { existingSpans })` therefore accepts the existing count
+and refuses only growth, which is the edit that actually crosses the line.
+
+**What the user sees.** Two `role="alert"` lines above the drawing, each carrying one
+concern:
+
+- `#spacing-warning` — unchanged for the tight case (the live `checkSpanClearance()`
+  verdict, which also disables export), and now also used for a stored spacing *wider*
+  than the field accepts (300 px), which draws correctly and is only outside the field's
+  range.
+- `#route-warning` — new, names the route row, its count and the 500 limit, and says the
+  route is kept exactly as saved.
+
+The parser reports the same conditions through `parseProjectJson(...).warnings`, so a
+headless consumer is told as well; nothing is ever clamped, rounded or dropped on the way
+in, and no schema version changed because the persisted format did not.
+
+**Evidence.** `test/constraints.test.js` — 17 tests: the limit values; 500 accepted and
+501 refused; grandfathered 648 kept, 649 refused, a new 648 refused, 648→500 ordinary;
+clamping at floor, ceiling, rounding and non-numeric; stored spacing below, above and
+inside the range; the verdict following an injected requirement (35 vs 50 for the same
+40 px project); over-long routes named by row; and, through the real parser and serializer,
+a 501-span and a 9 px project opening unchanged, a 300 px project opening unchanged, an
+in-range project saying nothing, a save/reload that does not drift, and a version-1
+document keeping its out-of-range values through every migration step.
+
+Browser `§Route and spacing limits` — 18 checks: the form refusing 501 and accepting 500;
+a 501-span / 9 px project opening with no recovery banner, both values intact, both
+warnings shown and export withheld; editing that route's direction without shortening it
+and seeing 501 in the saved file; typing 8 and getting 12; a 300 px project opening, being
+explained, and *not* withholding export; typing 400 and getting 120; and an ordinary
+project showing neither line.
+
+**Mutations.** Removing the grandfathering (`if (overLimit)`) fails Node test 4 and the
+browser check *the saved project keeps the grandfathered span count*. Clamping the stored
+spacing in the parser (`Math.min(120, Math.max(12, spanLength))`) fails 4 Node tests and 3
+browser checks. Both sources restored byte-for-byte with `cmp` clean.
+
+**Related documentation correction, still true.** The parser refuses direction *labels*
+(`"South"`); `VALID_DIRECTIONS` holds only the lowercase keys and such a file is refused
+with `INVALID_ROUTES`. All documentation states keys only.
 
 ## F2 — An edited route is now covered by a browser test
 
@@ -279,7 +334,7 @@ later, and left the import planner's own preconditions implicit. Both were repro
 **Impact.** Low for normal use — the dropdown and the reassign picker both offered only
 eligible points, so the UI could not produce this state. It mattered because the project
 file is the more permissive interface
-(see [Known limitations §10](10-limitations.md#10-form-and-model-disagree-in-two-places)):
+(see [Known limitations §10](10-limitations.md#10-form-and-file-differ-by-design-and-now-say-so)):
 a hand-edited or externally generated file could place a number on a TC triangle.
 
 **Aggravating detail, now corrected.** `test/annotations.test.js` test 27 was titled *"a

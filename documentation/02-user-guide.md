@@ -102,8 +102,20 @@ A row being edited keeps its own `from` even if editing another field.
 | `<= 0` | "Spans must be greater than zero." |
 | `> 500` | "Use 500 spans or fewer for one route." |
 
-The 500 limit is a **form-level** limit only; the engine has no such cap
-(`test/geometry.test.js` and the project parser accept any positive integer).
+The 500 limit is a **form-level** limit, and it is the only kind of limit it is. The
+engine has no such cap, and a project file may legitimately contain a longer route: it
+opens and is drawn exactly as saved, with a red line above the drawing naming the route:
+
+> Route 1 has 620 spans. The form adds and edits routes with at most 500, so this route is
+> kept exactly as saved; shorten it on the Routes tab before you change anything else about
+> it.
+
+That route can still be edited — its direction, its starting point, its marker — because
+its count is **grandfathered**: the value may be kept, and only grown past 500 is refused.
+Refusing the edit itself would force you to shorten a route you did not mean to touch.
+
+The limits for both contexts live in one place, `src/data/constraints.js`
+([F1](findings.md#f1-the-form-and-the-project-parser-disagreed-on-documented-limits)).
 
 ### TC point / FPB point
 
@@ -483,7 +495,14 @@ Zoom is clamped to `MIN_ZOOM = 0.15` … `MAX_ZOOM = 6`.
 
 Control: `#field-spacing`, a whole number of **pixels** per span. Default `40`
 (`DEFAULT_CONFIG.spanLength` in [src/config.js](../src/config.js)). Typing a value
-clamps it to `MIN_SPACING = 12` … `MAX_SPACING = 120` on commit.
+clamps it to `MIN_SPAN_SPACING = 12` … `MAX_SPAN_SPACING = 120` on commit — that pair,
+and nothing else, is where the field's range comes from
+(`src/data/constraints.js`).
+
+Clamping is for **typed values only**. A spacing that arrives in a project file is opened
+and drawn exactly as written: 9 px, 300 px or anything else positive. The drawing then says
+what is unusual about it, and `#field-spacing` shows the stored number, so the first change
+you make to the field is your own decision rather than a silent edit.
 
 The input's `min` attribute is not a constant: at boot `app.js` sets it to
 `requiredSpanLength()`, which is **35** with the shipped configuration (the static
@@ -497,9 +516,14 @@ changes the topology.
   `requiredSpanLength()` in [src/geometry/clearance.js](../src/geometry/clearance.js),
   computed from the marker sizes the renderers actually draw. With the shipped
   configuration it is **35 px**.
-- Below the requirement, `#spacing-warning` appears naming the shortest safe spacing,
-  and the three export buttons are disabled. The drawing stays visible and your typed
-  value is kept — nothing is changed for you.
+- Below the requirement, `#spacing-warning` appears naming the shortest safe spacing and
+  the value in use, and the three export buttons are disabled. The drawing stays visible
+  and your typed value is kept — nothing is changed for you.
+- Above `MAX_SPAN_SPACING` (120 px) the same line explains that the field accepts less.
+  Such a drawing exports normally: wide spacing draws correctly, so the mismatch is
+  reported rather than penalised.
+- The floor of 12 px is a **field range**, not a clearance rule. A value between 12 and 34
+  is accepted, still warns, and still cannot be exported.
 
 ## 15. Saving and loading a project
 

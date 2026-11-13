@@ -4,8 +4,8 @@
 
 1. [Requirements](#1-requirements)
 2. [Commands](#2-commands)
-3. [The Node suite: 485 tests in 30 files](#3-the-node-suite-485-tests-in-30-files)
-4. [The browser suite: 317 checks in 15 sections](#4-the-browser-suite-317-checks-in-15-sections)
+3. [The Node suite: 502 tests in 31 files](#3-the-node-suite-502-tests-in-31-files)
+4. [The browser suite: 335 checks in 16 sections](#4-the-browser-suite-335-checks-in-16-sections)
 5. [The headed print smoke test](#5-the-headed-print-smoke-test)
 6. [Test strategy: what is tested and why](#6-test-strategy-what-is-tested-and-why)
 7. [Writing a new test](#7-writing-a-new-test)
@@ -31,12 +31,12 @@
 
 | Command | What it does | Expected result |
 | --- | --- | --- |
-| `npm test` | `node --test "test/*.test.js"` | **485 tests, 485 pass, 0 fail** |
-| `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **317/317 checks pass** |
+| `npm test` | `node --test "test/*.test.js"` | **502 tests, 502 pass, 0 fail** |
+| `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **335/335 checks pass** |
 | `npm run test:print:headed` | `node scripts/print-dialog-smoke.mjs` — opens a real print dialog | manual, needs an interactive terminal |
 | `npm run serve` | static server for manual use | serve locally, then open the printed URL |
 
-Verified on this working tree: `npm test` → `tests 485, pass 485, fail 0`; the suite
+Verified on this working tree: `npm test` → `tests 502, pass 502, fail 0`; the suite
 takes about 1.2 s.
 
 `npm run test:browser` requires the Playwright browser binaries. `test-browser.mjs`
@@ -46,7 +46,7 @@ install command if it is absent, rather than a stack trace.
 The browser suite writes its downloads and diagnostics into a temp directory; nothing
 it produces is committed.
 
-## 3. The Node suite: 485 tests in 30 files
+## 3. The Node suite: 502 tests in 31 files
 
 The whole domain layer is DOM-free, so it is tested directly under Node. Files and
 their test counts:
@@ -55,6 +55,7 @@ their test counts:
 | --- | --- | --- |
 | `annotations.test.js` | 37 | Candidate positions, text measurement, leader/arrowhead geometry, collision avoidance, callout content, span-label placement, manual offsets |
 | `assets.test.js` | 15 | Asset id forms, alias resolution, first-writer-wins, registry round trips, spans ↔ edges |
+| `constraints.test.js` | 17 | The route and spacing policy: 500 accepted and 501 refused, an over-limit stored count grandfathered but not growable, clamping at both ends of the field, stored spacing below/above/inside the range described and never corrected, the verdict following an injected clearance requirement, and out-of-range projects (501 spans, 9 px, 300 px) opening unchanged through the parser, a save/reload and a v1 migration |
 | `clearance.test.js` | 9 | Derived marker extents, `requiredSpanLength()` = 35, `requiredClearanceDistance()` = 33, the FPB-box-reaches-a-neighbour failure mode |
 | `designations.test.js` | 23 | `Origin:1` vs `A1` vs `TC:1`, per-source counters, branching continuation, never-reissued names, span en dash, reload agreement |
 | `export_visibility.test.js` | 11 | Exports hide `Origin`/letters, the switch overrides, the notice never exported, FPB text always drawn |
@@ -90,7 +91,7 @@ Run one file:
 node --test test/geometry.test.js
 ```
 
-## 4. The browser suite: 317 checks in 15 sections
+## 4. The browser suite: 335 checks in 16 sections
 
 `npm run test:browser` starts a static server and drives Chromium against the real
 `index.html`. It asserts on the **rendered DOM and SVG**, not on internals.
@@ -111,7 +112,8 @@ node --test test/geometry.test.js
 | 12 | PDF output | The PDF is produced, is a real PDF, and contains the expected vector work |
 | 13 | Print output, every page layout | For all four layouts: the SVG is sized **explicitly in mm**, fits the printable box, keeps the scene aspect, and the `@page` size is the chosen paper — i.e. **one sheet** |
 | 14 | TC marker geometry | The printed leaving span equals the configured spacing; no line inside the triangle; the triangle's outline matches across profiles |
-| 15 | Console | No console errors or unhandled rejections during the whole run |
+| 15 | Route and spacing limits | The form refuses a 501st span with the message naming 500 and adds no route, while exactly 500 is accepted and drawn. A project this build would not have let anyone author - a 501-span route at 9 px spacing - opens with no recovery banner, keeps both values byte-for-byte, names the over-long route in `#route-warning`, explains the tight spacing in `#spacing-warning` and withholds export; that route is then edited (direction East) **without shortening it**, and the saved file still holds 501 spans. Typing 8 gives 12 and typing 400 gives 120; a 300 px project opens, is explained and still exports, because wide spacing draws correctly. A project within range shows neither warning ([F1](findings.md#f1-the-form-and-the-project-parser-disagreed-on-documented-limits)) |
+| 16 | Console | No console errors or unhandled rejections during the whole run |
 
 The route-edit section is the automated guard for the edit path that was previously
 untested in the DOM ([findings F2](findings.md#f2-an-edited-route-is-now-covered-by-a-browser-test)).
@@ -181,7 +183,7 @@ The suite is organised around **contracts**, not around files:
    `geometry.test.js` pin the example drawing at 34 nodes / 33 edges / the endpoint
    set, so a change in the walk shows up immediately.
 6. **DOM-free by construction.** Nothing in `test/` loads a browser; nothing in
-   `src/geometry/` or `src/data/` needs one. This is why 485 tests run in ~1.2 s.
+   `src/geometry/` or `src/data/` needs one. This is why 502 tests run in ~1.2 s.
 
 ## 7. Writing a new test
 

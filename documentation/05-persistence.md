@@ -336,6 +336,16 @@ Two deliberate behaviours:
   drawing no longer has. They are kept and can be reassigned."). That is the
   difference between "the file is broken" and "your drawing changed since you typed
   these numbers" — the second must never lose the numbers.
+- **Out-of-range settings are warnings, not refusals, and are never corrected.** A route
+  with more than `MAX_ROUTE_SPANS` (500) spans, or a `spanLength` outside the form's
+  12…120 px field range, opens and is drawn exactly as written.
+  `describeStoredLimits()` in `src/data/constraints.js` describes such values and the
+  parser adds the sentences to `parseProjectJson(...).warnings`; nothing is clamped,
+  rounded or dropped, and no migration step touches them. The rule is deliberate: a file
+  records what someone authored, and a later build narrowing a form field must not rewrite
+  it ([F1](findings.md#f1-the-form-and-the-project-parser-disagreed-on-documented-limits)).
+  A route over the limit is still editable — its count is grandfathered and only growth is
+  refused.
 
 Storage has its own two outcome codes, from `saveToStorage()`:
 `STORAGE_UNAVAILABLE` (no usable storage: private window, site data blocked, the
