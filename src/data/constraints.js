@@ -53,16 +53,26 @@ export const MAX_SPAN_SPACING = 120;
  * Judge a span count typed into the form.
  *
  * A route that is *already* longer than `MAX_ROUTE_SPANS` - it came from a file,
- * not from this form - keeps its count: the edit is allowed as long as the count
- * does not grow. Refusing outright would trap the user, because every other
- * change to that route (its direction, its marker, its starting point) would
- * then require shortening a route they did not mean to touch.
+ * not from this form - may keep its count, and may be shortened. What it may not
+ * do is grow. Refusing outright would trap the user, because every other change
+ * to that route (its direction, its marker, its starting point) would then require
+ * shortening a route they did not mean to touch.
+ *
+ * The rule is **monotonic non-increase** against the count the route currently
+ * has, which is what makes progressive reduction work: 648 may become 600, and 600
+ * may then become 550. An earlier version of this function accepted an over-limit
+ * count only when it was *identical* to the existing one, so every intermediate
+ * step of a reduction was refused and the only reachable way to shorten a long
+ * route was to jump straight to 500 or fewer.
  *
  * @param {number} spans Count from the form.
  * @param {object} [options] Context for the judgement.
  * @param {number|null} [options.existingSpans] Count the route already has, when editing.
  * @returns {{ok: boolean, code: string|null, message: string|null, grandfathered: boolean}}
- *   Verdict; `grandfathered` marks a count kept from a file rather than typed.
+ *   Verdict. `grandfathered` describes the situation rather than the verdict: it is
+ *   true whenever both the route as it stands and the proposed count are over the
+ *   limit, so a refusal for growth is visibly a refusal about a grandfathered route
+ *   and not about a new over-limit one.
  */
 export function checkRouteSpanCount(spans, options = {}) {
   const existingSpans = Number.isInteger(options.existingSpans) ? options.existingSpans : null;
@@ -83,13 +93,30 @@ export function checkRouteSpanCount(spans, options = {}) {
     };
   }
   const overLimit = spans > MAX_ROUTE_SPANS;
-  if (overLimit && spans !== existingSpans) {
-    return {
-      ok: false,
-      code: 'SPANS_ABOVE_LIMIT',
-      message: `Use ${MAX_ROUTE_SPANS} spans or fewer for one route.`,
-      grandfathered: false,
-    };
+  if (overLimit) {
+    // Grandfathering comes from the route as it stands, not from the number the user
+    // happened to type. A route at or under the limit has nothing to grandfather, so a
+    // new over-limit route is always refused.
+    const grandfatheredFrom = existingSpans !== null && existingSpans > MAX_ROUTE_SPANS;
+    if (!grandfatheredFrom) {
+      return {
+        ok: false,
+        code: 'SPANS_ABOVE_LIMIT',
+        message: `Use ${MAX_ROUTE_SPANS} spans or fewer for one route.`,
+        grandfathered: false,
+      };
+    }
+    if (spans > existingSpans) {
+      return {
+        ok: false,
+        code: 'SPANS_ABOVE_LIMIT',
+        message:
+          `This route has ${existingSpans} spans, above the ${MAX_ROUTE_SPANS} the form ` +
+          'adds routes with. It is kept as saved, so you can lower that count or leave ' +
+          'it, but not raise it.',
+        grandfathered: true,
+      };
+    }
   }
   return { ok: true, code: null, message: null, grandfathered: overLimit };
 }
@@ -113,8 +140,11 @@ export function clampSpanSpacing(value) {
 /**
  * Describe stored route span counts that the form would not accept.
  *
- * Advisory only: the route is opened and drawn with the count exactly as saved,
- * and the count may be kept when the route is edited - it just may not grow.
+ * Advisory only: the route is opened and drawn with the count exactly as saved, and
+ * the count may be kept when the route is edited - it just may not grow. The wording
+ * says all three of those things, because an earlier version told the user to shorten
+ * the route *before changing anything else*, which was both unnecessary (the count is
+ * retained and the route is editable) and false.
  *
  * @param {Array<{spans: number}>} routes Routes as read.
  * @returns {string[]} One message per out-of-range route, in row order.
@@ -124,9 +154,9 @@ export function describeStoredRouteLimits(routes) {
   for (const [index, route] of (Array.isArray(routes) ? routes : []).entries()) {
     if (!Number.isInteger(route?.spans) || route.spans <= MAX_ROUTE_SPANS) continue;
     warnings.push(
-      `Route ${index + 1} has ${route.spans} spans. The form adds and edits routes with at ` +
-        `most ${MAX_ROUTE_SPANS}, so this route is kept exactly as saved; shorten it on ` +
-        'the Routes tab before you change anything else about it.',
+      `Route ${index + 1} has ${route.spans} spans, above the ${MAX_ROUTE_SPANS} the form ` +
+        'adds routes with. It is kept as saved: you can leave that count or lower it, ' +
+        `but not raise it. At ${MAX_ROUTE_SPANS} or fewer it is an ordinary route again.`,
     );
   }
   return warnings;

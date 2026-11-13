@@ -94,11 +94,84 @@ test('4. an over-limit route from a file keeps its count when edited', () => {
   const grown = checkRouteSpanCount(649, { existingSpans: 648 });
   assert.equal(grown.ok, false);
   assert.equal(grown.code, 'SPANS_ABOVE_LIMIT');
+  assert.match(grown.message, /648 spans/);
+  assert.match(grown.message, /not raise it/);
 
   // Nor may a *new* route start over the limit.
   assert.equal(checkRouteSpanCount(648, { existingSpans: null }).ok, false);
   // A route already shortened below the limit is an ordinary route again.
   assert.equal(checkRouteSpanCount(500, { existingSpans: 648 }).ok, true);
+});
+
+test('4a. a grandfathered route may be shortened, not only kept exactly', () => {
+  // The rule is monotonic non-increase, not equality. An earlier version required the new
+  // count to *equal* the existing one, which refused every intermediate step of a
+  // reduction and left the user with no way to shorten a long route except by jumping
+  // straight to 500 or fewer.
+  for (const proposed of [647, 600, 501]) {
+    const result = checkRouteSpanCount(proposed, { existingSpans: 648 });
+    assert.equal(result.ok, true, `${proposed} of an existing 648 must be accepted`);
+    assert.equal(result.code, null);
+    assert.equal(result.grandfathered, true, 'still over the limit, so still grandfathered');
+  }
+
+  // The boundary in both directions, stated exhaustively.
+  // [proposed, existing, accepted, label]
+  const table = [
+    [MAX_ROUTE_SPANS, null, true, 'a new route at the limit'],
+    [MAX_ROUTE_SPANS + 1, null, false, 'a new route over the limit'],
+    [648, 648, true, 'kept'],
+    [649, 648, false, 'grown by one'],
+    [600, 648, true, 'reduced'],
+    [501, 648, true, 'reduced to one over the limit'],
+    [500, 648, true, 'reduced to the limit'],
+    [550, 600, true, 'a second reduction'],
+    [601, 600, false, 'a second growth'],
+  ];
+  for (const [proposed, existing, expected, label] of table) {
+    const result = checkRouteSpanCount(proposed, { existingSpans: existing });
+    assert.equal(result.ok, expected, `${label}: ${proposed} against existing ${existing}`);
+    // The flag describes the situation, not the verdict: true whenever both the route as it
+    // stands and the proposed count are over the limit, so a growth refusal is visibly a
+    // refusal *about a grandfathered route* rather than about a new over-limit one.
+    assert.equal(
+      result.grandfathered,
+      existing !== null && existing > MAX_ROUTE_SPANS && proposed > MAX_ROUTE_SPANS,
+      `${label}: grandfathered flag`,
+    );
+  }
+
+  // Under the limit there is nothing to grandfather, so the ordinary limit applies again.
+  const ordinary = checkRouteSpanCount(MAX_ROUTE_SPANS + 1, { existingSpans: MAX_ROUTE_SPANS });
+  assert.equal(ordinary.ok, false);
+  assert.equal(ordinary.code, 'SPANS_ABOVE_LIMIT');
+  assert.equal(ordinary.grandfathered, false);
+});
+
+test('4b. a long route can be walked all the way down to the limit, one step at a time', () => {
+  // Progressive reduction is the behaviour the browser section drives through the form:
+  // 648 -> 600 -> 550 -> 500. Each step is judged against the count the route has *now*,
+  // so each step is a reduction and each is therefore allowed. The baseline moves down with
+  // it, which is what stops the route being grown back.
+  let spans = 648;
+  for (const next of [600, 550, 520, MAX_ROUTE_SPANS]) {
+    const step = checkRouteSpanCount(next, { existingSpans: spans });
+    assert.equal(step.ok, true, `${spans} -> ${next} must be accepted`);
+    // The count the route has just left is now an increase, and is refused - the baseline
+    // moved down with the route, which is what stops it being grown back afterwards.
+    const regrow = checkRouteSpanCount(spans, { existingSpans: next });
+    assert.equal(regrow.ok, false, `${next} -> ${spans} must be refused`);
+    assert.equal(regrow.code, 'SPANS_ABOVE_LIMIT');
+    spans = next;
+  }
+  assert.equal(spans, MAX_ROUTE_SPANS);
+  assert.equal(
+    checkRouteSpanCount(MAX_ROUTE_SPANS, { existingSpans: MAX_ROUTE_SPANS }).grandfathered,
+    false,
+    'at the limit there is nothing left to grandfather',
+  );
+  // And the ordinary rule is back in force: one more span is refused.
+  assert.equal(checkRouteSpanCount(MAX_ROUTE_SPANS + 1, { existingSpans: MAX_ROUTE_SPANS }).ok, false);
 });
 
 /* ------------------------------------------------------------------ */
@@ -162,8 +235,16 @@ test('9. an over-long stored route is described by row, with its own count', () 
   assert.equal(messages.length, 2);
   assert.match(messages[0], /Route 2 has 501 spans/);
   assert.match(messages[1], /Route 3 has 1200 spans/);
-  assert.match(messages[0], /most 500/);
-  assert.match(messages[0], /kept exactly as saved/);
+  assert.match(messages[0], /above the 500/);
+  assert.match(messages[0], /kept as saved/);
+  // The message states the whole rule: retain or reduce, never grow, and no longer
+  // special once it is back within the limit.
+  assert.match(messages[0], /leave that count or lower it/);
+  assert.match(messages[0], /not raise it/);
+  assert.match(messages[0], /ordinary route again/);
+  // And it no longer tells the user to shorten the route before touching anything else,
+  // which was never true - the count is retained and the route is fully editable.
+  assert.doesNotMatch(messages[0], /before you change anything else/);
   assert.deepEqual(describeStoredRouteLimits([{ spans: 1 }, { spans: MAX_ROUTE_SPANS }]), []);
 });
 

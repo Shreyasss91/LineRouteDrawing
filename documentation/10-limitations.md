@@ -136,9 +136,9 @@ not been demonstrated.
 
 ### Verified automatically
 
-- The whole domain layer: **526 Node tests across 33 files**, all passing on the
+- The whole domain layer: **528 Node tests across 33 files**, all passing on the
   current working tree.
-- The application in a real browser: **340 checks in 17 sections**, all passing,
+- The application in a real browser: **355 checks in 17 sections**, all passing,
   including one-page print fit for **all four layouts** and the TC geometry on the
   printed sheet.
 
@@ -209,7 +209,7 @@ it is now one policy module, `src/data/constraints.js`, with one rule per contex
 | Limit | Interactive (form) | Stored (file) | What the user sees |
 | --- | --- | --- | --- |
 | Spans per route | whole number 1…500; 501 is refused with "Use 500 spans or fewer for one route." | any whole number ≥ 1 is opened and drawn | above 500, the `#route-warning` line names the row and the count |
-| Editing a route over 500 | — | **grandfathered**: the count may be kept and may not grow | the warning stays until the route is shortened |
+| Editing a route over 500 | — | **grandfathered**: the count may be kept or lowered, and may not grow | the warning stays until the route is at 500 or fewer; each reduction is accepted, and 500 → 501 is then refused like any ordinary route |
 | Span spacing | clamped into 12…120 px on entry | any finite value > 0 is opened and drawn, never clamped | below `requiredSpanLength()` (35 px): the tight-spacing warning and export disabled; above 120: the field range is explained, export unaffected |
 
 The floor of 12 px is a field range, not a clearance rule — anything between 12 and 34 px

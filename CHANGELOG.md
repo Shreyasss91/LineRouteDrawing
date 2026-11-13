@@ -15,6 +15,83 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ## Unreleased
 
+### Fixed
+
+- **A grandfathered route could be kept but not shortened, step by step (follow-up to
+  F1).** `82ed9db` accepted a stored count above 500 only when the new count *equalled* the
+  existing one:
+
+  ```js
+  if (overLimit && spans !== existingSpans) { ...refuse... }
+  ```
+
+  so `checkRouteSpanCount(648, { existingSpans: 648 })` succeeded while
+  `checkRouteSpanCount(600, { existingSpans: 648 })` failed. The documented policy - and
+  the user-facing warning written in the same commit - said the count "may be kept and may
+  not grow", which promises reduction. The code refused every change that was not
+  growth-neutral, so the only reachable way to shorten a long route was a single jump to
+  500 or fewer; 648 to 600, or 600 to 550, was refused even though each step is exactly the
+  reduction the policy offers.
+
+  The rule is now **monotonic non-increase** against the count the route has *now*:
+
+  ```js
+  const grandfatheredFrom = existingSpans !== null && existingSpans > MAX_ROUTE_SPANS;
+  if (!grandfatheredFrom) refuse;        // nothing to grandfather: a new over-limit route
+  if (spans > existingSpans) refuse;     // growth, the edit that crosses the line
+  ```
+
+  | Existing | Proposed | Result |
+  | ---: | ---: | --- |
+  | - | 500 | accept |
+  | - | 501 | refuse (`SPANS_ABOVE_LIMIT`) |
+  | 648 | 648 | accept, retained |
+  | 648 | 649 | refuse |
+  | 648 | 600 | accept, reduced |
+  | 648 | 501 | accept, reduced |
+  | 648 | 500 | accept, ordinary route again |
+  | 600 (after a reduction) | 550 | accept, reduced again |
+  | 600 (after a reduction) | 601 | refuse |
+
+  The baseline moves down with the route, which is what stops a reduction being undone:
+  after 648 -> 600 the route cannot be grown back to 648. At 500 or fewer there is nothing
+  left to grandfather, so the ordinary authoring limit applies again and 500 -> 501 is
+  refused. The 500-span authoring limit, the `MAX_ROUTE_SPANS` constant, and all validation
+  for non-integer and non-positive counts are unchanged; so is every other route-edit and
+  topology behaviour.
+
+  **The warning was wrong too.** `#route-warning` told the user to "shorten it on the
+  Routes tab before you change anything else about it", which was never true - the count is
+  retained and the route is fully editable. It now states the whole rule in one sentence:
+
+  ```
+  Route 1 has 648 spans, above the 500 the form adds routes with. It is kept as saved: you
+  can leave that count or lower it, but not raise it. At 500 or fewer it is an ordinary
+  route again.
+  ```
+
+  **Coverage.** `test/constraints.test.js` 17 -> 19: a table of every boundary in both
+  directions (kept, grown by one, reduced, reduced to 501, reduced to 500, a second
+  reduction 600 -> 550, a second growth 601), plus a walk from 648 down to 500 in steps where
+  each step is judged against the count the route has at that moment and each is followed by
+  proof that the count it left is now refused. The browser section grew 18 -> 33 checks: a
+  648-span project with a load on its destination is opened, its direction changed with the
+  count kept, then reduced 648 -> 600 (saved and reloaded), then 600 -> 550, then refused at
+  551 with the saved route still at 550, then reduced to 500 where the warning disappears and
+  500 -> 501 is refused - with the route id (`route-1`), its direction and its
+  `dst:route-1` load checked at every step. A *new* 501-span route is still refused
+  throughout, so the new and the grandfathered paths are shown not to have merged.
+
+  **Reversible mutation.** Putting the equality test back fails Node tests 4a and 4b and
+  five browser checks, including *reducing 648 to 600 is accepted and saved* and *a second
+  reduction, 600 to 550, is accepted and saved*; `src/data/constraints.js` was restored
+  byte-for-byte (`cmp` clean) and both suites re-run green.
+
+  Documentation: the F1 entry in `findings.md` records the discrepancy, the corrected rule
+  and both mutations; `02-user-guide.md`, `05-persistence.md`, `10-limitations.md` and
+  `09-feature-matrix.md` state "kept or reduced, never grown"; counts updated (528 Node tests
+  in 33 files, 355 browser checks in 17 sections).
+
 ### Added
 
 - **A reproducible performance baseline for large drawings (closes finding F9).** The tool

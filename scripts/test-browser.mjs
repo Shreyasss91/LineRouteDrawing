@@ -2957,6 +2957,224 @@ try {
     String(editedState.route),
   );
 
+  /* ---------------- A grandfathered route can be reduced, step by step ---------------- */
+
+  // The rule is monotonic non-increase: a saved route above the limit may keep its count or
+  // lower it, but may never raise it. An earlier build accepted an over-limit count only
+  // when it was *identical* to the saved one, so every intermediate step of a reduction was
+  // refused and the only way to shorten such a route was to jump straight to 500. This block
+  // drives the real form 648 -> 600 -> 550 and then checks both directions of the rule: 551
+  // is still refused, and 500 returns the route to ordinary behaviour.
+  const overLimitDoc = await page.evaluate(async () => {
+    const { serializeProjectJson } = await import('./src/ui/project.js');
+    return serializeProjectJson(
+      {
+        routes: [
+          { id: 'route-1', from: 'origin', direction: 'south', spans: 648, tc: false, fpb: false },
+        ],
+        originMarker: 'plain',
+        spanLength: 40,
+        layout: 'a4_landscape',
+        loads: [{ id: 'load-1', nodeId: 'dst:route-1', value: 25, unit: 'kVA' }],
+        spanLengths: {},
+        loadPlacements: {},
+        spanPlacements: {},
+        nodeDesignations: {},
+      },
+      { savedAt: new Date('2026-01-01T00:00:00Z') },
+    );
+  });
+  await page.evaluate((doc) => {
+    localStorage.clear();
+    localStorage.setItem('line-route-drawing:v3:project', doc);
+  }, overLimitDoc);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg', { timeout: 30000 });
+  await page.waitForTimeout(900);
+
+  /** The route records, the warning line and the drawn callout, read from the page. */
+  const readGrandfathered = () =>
+    page.evaluate(() => {
+      const svg = document.querySelector('#preview-canvas svg');
+      const callout = svg?.querySelector('[id="callout:dst:route-1"]');
+      const warning = document.querySelector('#route-warning');
+      const rows = [...document.querySelectorAll('#route-rows tr[data-id]')];
+      return {
+        rowIds: rows.map((tr) => tr.dataset.id),
+        // Column 3 is "Spans" (#, From, Direction, Spans, Marker, Status, Actions).
+        rowSpans: rows.map((tr) => tr.querySelectorAll('td')[3]?.textContent.trim() ?? null),
+        warning: warning && !warning.hidden ? warning.textContent.trim() : null,
+        callout: callout ? callout.textContent.trim() : null,
+        formError: document.querySelector('#form-error')?.textContent.trim() ?? null,
+      };
+    });
+
+  /** Edit route 1 to a new span count through the form, keeping its direction. */
+  async function setRouteSpanCount(spans) {
+    await page.locator('#route-rows tr').first().locator('button[data-action="edit"]').click();
+    await page.waitForTimeout(200);
+    await page.fill('#field-spans', String(spans));
+    await page.click('#btn-save-route');
+    await page.waitForTimeout(1200);
+  }
+
+  const openedGrandfathered = await readGrandfathered();
+  const openedSaved = await readSavedProject(page);
+  check(
+    'a 648-span stored route opens with its own count',
+    openedSaved?.routes?.[0]?.id === 'route-1' &&
+      openedSaved?.routes?.[0]?.spans === 648 &&
+      openedGrandfathered.rowSpans.includes('648'),
+    JSON.stringify({ spans: openedSaved?.routes?.[0]?.spans, rows: openedGrandfathered.rowSpans }),
+  );
+  check(
+    'the warning says the count may be kept or lowered, not that it must be shortened',
+    /648 spans/.test(openedGrandfathered.warning ?? '') &&
+      /leave that count or lower it/.test(openedGrandfathered.warning ?? '') &&
+      /not raise it/.test(openedGrandfathered.warning ?? '') &&
+      !/before you change anything else/.test(openedGrandfathered.warning ?? ''),
+    String(openedGrandfathered.warning),
+  );
+  check(
+    'the load on the long route is drawn and resolvable',
+    /25 kVA/.test(openedGrandfathered.callout ?? '') &&
+      openedSaved?.loads?.[0]?.nodeId === 'dst:route-1',
+    JSON.stringify({ callout: openedGrandfathered.callout, load: openedSaved?.loads?.[0] }),
+  );
+
+  // 1. Keeping the count while changing the direction - the case the earlier build did allow,
+  //    re-checked here so a failure of the reduction path cannot hide a regression in this one.
+  await page.locator('#route-rows tr').first().locator('button[data-action="edit"]').click();
+  await page.waitForTimeout(200);
+  await page.selectOption('#field-direction', 'east');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(1200);
+  const keptSaved = await readSavedProject(page);
+  check(
+    'editing the direction with all 648 spans kept still succeeds',
+    keptSaved?.routes?.[0]?.spans === 648 && keptSaved?.routes?.[0]?.direction === 'east',
+    JSON.stringify(keptSaved?.routes?.[0]),
+  );
+
+  // 2. The first reduction: 648 -> 600. This is the step the earlier build refused.
+  await setRouteSpanCount(600);
+  const reduced600 = await readSavedProject(page);
+  check(
+    'reducing 648 to 600 is accepted and saved',
+    reduced600?.routes?.[0]?.spans === 600 &&
+      reduced600?.routes?.[0]?.id === 'route-1' &&
+      reduced600?.routes?.[0]?.direction === 'east',
+    JSON.stringify(reduced600?.routes?.[0]),
+  );
+  check(
+    'the route id and its load survive the reduction',
+    reduced600?.loads?.length === 1 &&
+      reduced600?.loads?.[0]?.id === 'load-1' &&
+      reduced600?.loads?.[0]?.nodeId === 'dst:route-1' &&
+      reduced600?.loads?.[0]?.value === 25 &&
+      reduced600?.loads?.[0]?.unit === 'kVA',
+    JSON.stringify(reduced600?.loads),
+  );
+
+  // 3. Reload, to prove the reduction reached the file rather than only the screen.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg', { timeout: 30000 });
+  await page.waitForTimeout(900);
+  const reloaded600 = await readSavedProject(page);
+  const reloadedState = await readGrandfathered();
+  check(
+    'the reduced count survives a reload',
+    reloaded600?.routes?.[0]?.spans === 600 &&
+      reloaded600?.loads?.[0]?.nodeId === 'dst:route-1' &&
+      /600 spans/.test(reloadedState.warning ?? ''),
+    JSON.stringify({ spans: reloaded600?.routes?.[0]?.spans, warning: reloadedState.warning }),
+  );
+
+  // 4. A second reduction, from the count the route has *now*: 600 -> 550.
+  await setRouteSpanCount(550);
+  const reduced550 = await readSavedProject(page);
+  check(
+    'a second reduction, 600 to 550, is accepted and saved',
+    reduced550?.routes?.[0]?.spans === 550 && reduced550?.routes?.[0]?.id === 'route-1',
+    JSON.stringify(reduced550?.routes?.[0]),
+  );
+
+  // 5. Growth is still refused, and refused without touching the route.
+  await page.locator('#route-rows tr').first().locator('button[data-action="edit"]').click();
+  await page.waitForTimeout(200);
+  await page.fill('#field-spans', '551');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(400);
+  const growRefusal = await readGrandfathered();
+  const afterGrowAttempt = await readSavedProject(page);
+  check(
+    'raising 550 back to 551 is refused and names the current count',
+    /550 spans/.test(growRefusal.formError ?? '') && /not raise it/.test(growRefusal.formError ?? ''),
+    String(growRefusal.formError),
+  );
+  check(
+    'the refused growth leaves the saved route at 550',
+    afterGrowAttempt?.routes?.[0]?.spans === 550,
+    JSON.stringify(afterGrowAttempt?.routes?.[0]?.spans),
+  );
+
+  // 6. A new over-limit route is still refused while a grandfathered one exists - the two
+  //    paths must not have been merged into one another by this change.
+  await page.click('#btn-cancel-edit');
+  await page.waitForTimeout(200);
+  await page.selectOption('#field-from', 'origin');
+  await page.selectOption('#field-direction', 'south');
+  await page.fill('#field-spans', '501');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(400);
+  const newOverLimit = await readGrandfathered();
+  const afterNewAttempt = await readRouteRows(page);
+  check(
+    'a new 501-span route is still refused',
+    /500 spans or fewer/.test(newOverLimit.formError ?? '') && afterNewAttempt.length === 1,
+    `${newOverLimit.formError} / ${afterNewAttempt.length} rows`,
+  );
+
+  // 7. Down to the limit: the route becomes ordinary again.
+  await setRouteSpanCount(500);
+  const reduced500 = await readSavedProject(page);
+  const ordinaryState = await readGrandfathered();
+  check(
+    'reducing to 500 is accepted and saved',
+    reduced500?.routes?.[0]?.spans === 500 && reduced500?.routes?.[0]?.id === 'route-1',
+    JSON.stringify(reduced500?.routes?.[0]),
+  );
+  check(
+    'at 500 spans the route warning disappears',
+    ordinaryState.warning === null,
+    String(ordinaryState.warning),
+  );
+  // Ordinary means the authoring limit applies again: one more span is refused there.
+  await page.locator('#route-rows tr').first().locator('button[data-action="edit"]').click();
+  await page.waitForTimeout(200);
+  await page.fill('#field-spans', '501');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(400);
+  const ordinaryGrow = await readGrandfathered();
+  check(
+    'once back at 500 the ordinary limit refuses a 501st span',
+    /500 spans or fewer/.test(ordinaryGrow.formError ?? ''),
+    String(ordinaryGrow.formError),
+  );
+  await page.click('#btn-cancel-edit');
+  await page.waitForTimeout(300);
+  const finalProject = await readSavedProject(page);
+  check(
+    'the route, its id, its direction and its load are intact at the end',
+    finalProject?.routes?.[0]?.id === 'route-1' &&
+      finalProject?.routes?.[0]?.direction === 'east' &&
+      finalProject?.routes?.[0]?.spans === 500 &&
+      finalProject?.loads?.length === 1 &&
+      finalProject?.loads?.[0]?.nodeId === 'dst:route-1' &&
+      finalProject?.loads?.[0]?.value === 25,
+    JSON.stringify({ route: finalProject?.routes?.[0], loads: finalProject?.loads }),
+  );
+
   // Typing into the spacing field is interactive, so it is brought into range - the one
   // place clamping is the right answer, because the user just asked for that value.
   await page.fill('#field-spacing', '8');

@@ -55,7 +55,7 @@ now defined separately, and deliberately:
 | | Interactive input (the form) | Stored values (a project file) |
 | --- | --- | --- |
 | Spans per route | whole number, 1…500; 501 refused before anything changes | any whole number ≥ 1 is opened and drawn unchanged; > 500 is reported |
-| Editing a route over 500 | — | **grandfathered**: the count may be kept, and may not grow |
+| Editing a route over 500 | — | **grandfathered**: the count may be kept *or reduced*, and never grown |
 | Span spacing | clamped into 12…120 on entry | any finite value > 0 is opened and drawn unchanged; outside the range or below the clearance requirement, it is reported |
 | Spacing below `requiredSpanLength()` (35 px) | accepted with the clearance warning and export disabled | same verdict, and the message names the value that will fix it |
 
@@ -72,6 +72,56 @@ or its starting point would all require first shortening a route they did not me
 touch. `checkRouteSpanCount(spans, { existingSpans })` therefore accepts the existing count
 and refuses only growth, which is the edit that actually crosses the line.
 
+**The rule is monotonic non-increase, not equality.** This was wrong in the first version
+of the fix (`82ed9db`) and was corrected afterwards. That version accepted an over-limit
+count only when it *equalled* the existing one:
+
+```js
+// 82ed9db - refuses every intermediate step of a reduction
+if (overLimit && spans !== existingSpans) { ...refuse... }
+```
+
+so `checkRouteSpanCount(648, { existingSpans: 648 })` succeeded while
+`checkRouteSpanCount(600, { existingSpans: 648 })` failed. The documented policy said the
+count "may be kept and may not grow"; the code additionally refused any change that was
+not growth-neutral, which made the only reachable way to shorten a long route a single jump
+to 500 or fewer. Anything in between - 648 to 600, or 600 to 550 - was refused, even though
+each step is exactly the reduction the policy promises.
+
+The corrected test is the comparison, not equality:
+
+```js
+const grandfatheredFrom = existingSpans !== null && existingSpans > MAX_ROUTE_SPANS;
+if (!grandfatheredFrom) refuse;            // nothing to grandfather: a new route
+if (spans > existingSpans) refuse;         // growth, the edit that crosses the line
+```
+
+| Existing | Proposed | Verdict |
+| ---: | ---: | --- |
+| - | 500 | accept |
+| - | 501 | refuse (`SPANS_ABOVE_LIMIT`) |
+| 648 | 648 | accept, retained |
+| 648 | 649 | refuse (`SPANS_ABOVE_LIMIT`) |
+| 648 | 600 | accept, reduced |
+| 648 | 501 | accept, reduced |
+| 648 | 500 | accept, ordinary route again |
+| 600 (after a reduction) | 550 | accept, reduced again |
+| 600 (after a reduction) | 601 | refuse |
+
+The baseline for the comparison is the count the route has **now**, so it moves down with
+every accepted reduction: after 648 -> 600, the route may not be grown back to 648, and 601
+is refused. Reducing to 500 or fewer leaves nothing to grandfather, so the ordinary
+authoring limit applies again - 500 -> 501 is then refused like any other route.
+
+**A refusal now explains itself in two registers.** A *new* over-limit route keeps the
+short instruction (`Use 500 spans or fewer for one route.`); growing a retained one names
+the count it currently has and says why:
+
+```
+This route has 550 spans, above the 500 the form adds routes with. It is kept as saved,
+so you can lower that count or leave it, but not raise it.
+```
+
 **What the user sees.** Two `role="alert"` lines above the drawing, each carrying one
 concern:
 
@@ -79,33 +129,49 @@ concern:
   verdict, which also disables export), and now also used for a stored spacing *wider*
   than the field accepts (300 px), which draws correctly and is only outside the field's
   range.
-- `#route-warning` — new, names the route row, its count and the 500 limit, and says the
-  route is kept exactly as saved.
+- `#route-warning` — new, names the route row, its count and the 500 limit, and states the
+  whole rule in one sentence: the count is kept as saved, it may be left or lowered but not
+  raised, and at 500 or fewer the route is ordinary again. The first version said to
+  *shorten it before you change anything else*, which was never true - the count is retained
+  and the rest of the route is fully editable - so the wording was corrected in the same act
+  that fixed the rule above.
 
 The parser reports the same conditions through `parseProjectJson(...).warnings`, so a
 headless consumer is told as well; nothing is ever clamped, rounded or dropped on the way
 in, and no schema version changed because the persisted format did not.
 
-**Evidence.** `test/constraints.test.js` — 17 tests: the limit values; 500 accepted and
-501 refused; grandfathered 648 kept, 649 refused, a new 648 refused, 648→500 ordinary;
-clamping at floor, ceiling, rounding and non-numeric; stored spacing below, above and
-inside the range; the verdict following an injected requirement (35 vs 50 for the same
-40 px project); over-long routes named by row; and, through the real parser and serializer,
-a 501-span and a 9 px project opening unchanged, a 300 px project opening unchanged, an
-in-range project saying nothing, a save/reload that does not drift, and a version-1
-document keeping its out-of-range values through every migration step.
+**Evidence.** `test/constraints.test.js` - 19 tests: the limit values; 500 accepted and
+501 refused; grandfathered 648 kept, 649 refused, a new 648 refused, 648->500 ordinary;
+**every boundary of the monotonic rule as a table** (including 648->600, 648->501 and a
+second reduction 600->550 with its refusal at 601); a walk down from 648 to 500 in steps,
+each judged against the count the route has at that moment and each followed by a proof
+that the count it left is now refused; clamping at floor, ceiling, rounding and non-numeric;
+stored spacing below, above and inside the range; the verdict following an injected
+requirement (35 vs 50 for the same 40 px project); over-long routes named by row, with the
+corrected wording asserted and the withdrawn "before you change anything else" phrase
+asserted *absent*; and, through the real parser and serializer, a 501-span and a 9 px
+project opening unchanged, a 300 px project opening unchanged, an in-range project saying
+nothing, a save/reload that does not drift, and a version-1 document keeping its
+out-of-range values through every migration step.
 
-Browser `§Route and spacing limits` — 18 checks: the form refusing 501 and accepting 500;
-a 501-span / 9 px project opening with no recovery banner, both values intact, both
-warnings shown and export withheld; editing that route's direction without shortening it
-and seeing 501 in the saved file; typing 8 and getting 12; a 300 px project opening, being
-explained, and *not* withholding export; typing 400 and getting 120; and an ordinary
-project showing neither line.
+Browser `§Route and spacing limits` - 33 checks. Alongside the original 18, a 648-span
+project with a load on its destination is driven through the real form: it opens with its
+count and the corrected warning; its direction is changed with all 648 spans kept; it is
+reduced **648 -> 600**, and the saved project shows the new count with the route id
+(`route-1`), the direction and the `dst:route-1` load intact; a reload shows 600; a second
+reduction **600 -> 550** is accepted; **551 is refused** with a message naming 550, and the
+saved route stays at 550; a *new* 501-span route is still refused while the retained route
+exists; **500** is accepted, the warning line disappears, and 500 -> 501 is refused again
+like any ordinary route. The final saved project is checked for route id, direction and load
+identity.
 
 **Mutations.** Removing the grandfathering (`if (overLimit)`) fails Node test 4 and the
 browser check *the saved project keeps the grandfathered span count*. Clamping the stored
 spacing in the parser (`Math.min(120, Math.max(12, spanLength))`) fails 4 Node tests and 3
-browser checks. Both sources restored byte-for-byte with `cmp` clean.
+browser checks. Restoring the equality test (`if (overLimit && spans !== existingSpans)`)
+fails Node tests 4a and 4b and five browser checks, including *reducing 648 to 600 is
+accepted and saved* and *a second reduction, 600 to 550, is accepted and saved*. All
+sources restored byte-for-byte with `cmp` clean.
 
 **Related documentation correction, still true.** The parser refuses direction *labels*
 (`"South"`); `VALID_DIRECTIONS` holds only the lowercase keys and such a file is refused

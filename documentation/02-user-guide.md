@@ -106,13 +106,19 @@ The 500 limit is a **form-level** limit, and it is the only kind of limit it is.
 engine has no such cap, and a project file may legitimately contain a longer route: it
 opens and is drawn exactly as saved, with a red line above the drawing naming the route:
 
-> Route 1 has 620 spans. The form adds and edits routes with at most 500, so this route is
-> kept exactly as saved; shorten it on the Routes tab before you change anything else about
-> it.
+> Route 1 has 620 spans, above the 500 the form adds routes with. It is kept as saved: you
+> can leave that count or lower it, but not raise it. At 500 or fewer it is an ordinary
+> route again.
 
 That route can still be edited — its direction, its starting point, its marker — because
-its count is **grandfathered**: the value may be kept, and only grown past 500 is refused.
-Refusing the edit itself would force you to shorten a route you did not mean to touch.
+its count is **grandfathered**: the value may be kept or **lowered**, and only growth is
+refused. Refusing the edit itself would force you to shorten a route you did not mean to
+touch.
+
+Reducing it works in steps, and each step is judged against the count the route has at that
+moment: 620 → 600 → 550 are all accepted, 600 → 620 is not, and once it reaches 500 it is an
+ordinary route and 500 → 501 is refused like anywhere else. The baseline moves down with the
+route, so a reduction can never be undone by growing it back.
 
 The limits for both contexts live in one place, `src/data/constraints.js`
 ([F1](findings.md#f1-the-form-and-the-project-parser-disagreed-on-documented-limits)).

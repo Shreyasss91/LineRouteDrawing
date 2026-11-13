@@ -383,8 +383,10 @@ Two deliberate behaviours:
   rounded or dropped, and no migration step touches them. The rule is deliberate: a file
   records what someone authored, and a later build narrowing a form field must not rewrite
   it ([F1](findings.md#f1-the-form-and-the-project-parser-disagreed-on-documented-limits)).
-  A route over the limit is still editable — its count is grandfathered and only growth is
-  refused.
+  A route over the limit is still editable: its count is grandfathered, may be kept or
+  reduced, and only growth is refused. The comparison is against the count the route has
+  *now*, so progressive reductions (648 → 600 → 550 → 500) each succeed while every
+  re-growth is refused, and at 500 or fewer the ordinary limit applies again.
 
 Storage has its own two outcome codes, from `saveToStorage()`:
 `STORAGE_UNAVAILABLE` (no usable storage: private window, site data blocked, the
