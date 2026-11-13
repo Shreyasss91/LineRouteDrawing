@@ -224,6 +224,9 @@ alone:
 
 **This is quadratic, not linear.** Linear work doubles when the drawing doubles; this
 nearly quadruples from 200 upwards, and the cost *per span* climbs instead of staying flat.
+The scan described here was replaced by a per-scene spatial index
+([12-annotation-placement.md](12-annotation-placement.md)); the numbers below are the
+**before** state, and §7.1 has the after state.
 The cause is visible in the code rather than inferred from the curve:
 [`countCollisions()`](../src/geometry/annotations.js) walks the entire static obstacle list
 **and** the entire list of already-taken labels for every candidate position it scores, and
@@ -239,6 +242,34 @@ act that produced this baseline**: the brief was to measure, and a speculative r
 the placement search would be exactly the kind of unmeasured change a baseline exists to
 prevent.
 
+### 7.1 After the F13 index
+
+The index was added later, with this baseline as its before-and-after
+([Annotation placement](12-annotation-placement.md)). Same scripts, same machine, same
+datasets, same iteration counts; five runs of the scaling series before and five after,
+median shown:
+
+| Spans | Before | After | Speed-up |
+| ---: | ---: | ---: | ---: |
+| 50 | 1.02 ms | 0.66 ms | 1.5x |
+| 100 | 1.99 ms | 1.32 ms | 1.5x |
+| 200 | 5.60 ms | 2.75 ms | 2.0x |
+| 400 | 20.61 ms | 8.84 ms | 2.3x |
+| 800 | 75.66 ms | 22.60 ms | 3.3x |
+
+On the four fixed drawings, `place annotations` went from 13.05 ms to 4.07 ms on C-large
+and from 13.00 ms to 4.20 ms on D-surveyed (3.2x and 3.1x), and the full pipeline from
+17.20 ms to 8.94 ms and 18.53 ms to 10.31 ms. The two small drawings are unchanged within
+noise. The `-` and `npm run benchmark` numbers in §5 above are the **before** state and are
+kept, because a baseline that is rewritten whenever the code improves stops being a
+baseline; the after numbers live here and in
+[12-annotation-placement.md §9](12-annotation-placement.md#9-results-before-and-after).
+
+What did *not* happen: no dataset was made smaller, no annotation was dropped, no threshold
+was added, and the method above is unchanged. The remaining per-doubling growth (~1.6-2.0x
+in the middle of the series, 2.6x at the top) is the geometry of a 501-label strip, not the
+lookup — see §10 of [12-annotation-placement.md](12-annotation-placement.md#10-what-was-deliberately-not-optimized).
+
 ## 8. What these numbers mean for a user
 
 Stated as ranges, not promises, and derived from the tables above rather than from a
@@ -248,8 +279,13 @@ target someone invented:
 | --- | --- | --- |
 | the bundled example (34 spans) | ~0.13 s to a finished drawing | ~7 ms — imperceptible |
 | ~100 spans | ~0.14 s | ~13 ms — imperceptible |
-| ~500 spans, unmeasured | ~0.23 s | ~90 ms — a visible but tolerable pause |
-| ~500 spans, fully surveyed | ~0.47 s | ~225 ms, p95 ~0.36 s — noticeable on every edit |
+| ~500 spans, unmeasured | ~0.23 s | ~62 ms — a visible but tolerable pause |
+| ~500 spans, fully surveyed | ~0.36 s | ~151 ms — noticeable on every edit |
+
+(Those two recompute figures are the *after* measurement from
+[12-annotation-placement.md §9](12-annotation-placement.md#9-results-before-and-after). The
+pre-index figures were ~90 ms and ~225 ms, and the reduction is smaller than the 3.2x
+placement speed-up because most of a recompute is not placement.)
 
 So: the tool is comfortable to a few hundred spans, and the fully-surveyed 500-span case is
 the point where editing starts to feel slow. The editable limit (`MAX_ROUTE_SPANS`, 500 per

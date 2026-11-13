@@ -23,9 +23,14 @@
  * leave stranded.
  *
  * Everything here is pure: no DOM, no renderer, no clock.
+ *
+ * Where the collision question is answered changed with finding F13: instead of walking
+ * every obstacle for every candidate, the caller hands in a per-scene index
+ * ([spatial_index.js](./spatial_index.js)) and this module asks it. The rule is untouched -
+ * the index only narrows the candidates, and `annotateCollides` still decides each one.
  */
 
-import { annotateCollides } from './collide.js';
+import { collisionCounter } from './spatial_index.js';
 
 /** Half the width of the leader arrow's approach at the node, in px. */
 const NODE_APPROACH = 1;
@@ -247,6 +252,13 @@ export function placeCallout(input) {
   const { node, size, obstacles, taken, bounds, config } = input;
   const offset = input.offset ?? { dx: 0, dy: 0 };
   const manual = offset.dx !== 0 || offset.dy !== 0;
+  const countCollisions = collisionCounter({
+    index: input.index,
+    obstacles,
+    taken,
+    bounds,
+    clearance: config.annotClearance,
+  });
 
   const candidates = loadCandidates(node, size, config).map((candidate) => ({
     ...candidate,
@@ -269,7 +281,7 @@ export function placeCallout(input) {
       center,
       side: base.side,
       candidateIndex: clampIndex(offset.candidateIndex, candidates.length),
-      collisions: countCollisions(center, size, obstacles, taken, bounds, config),
+      collisions: countCollisions(boxAround(center, size)),
       manual: true,
     };
   }
@@ -277,7 +289,7 @@ export function placeCallout(input) {
   let best = null;
   let bestIndex = 0;
   candidates.forEach((candidate, index) => {
-    const collisions = countCollisions(candidate.center, size, obstacles, taken, bounds, config);
+    const collisions = countCollisions(boxAround(candidate.center, size));
     if (!best || collisions < best.collisions) {
       best = { ...candidate, collisions };
       bestIndex = index;
@@ -319,6 +331,13 @@ export function placeSpanLabel(input) {
   const { span, size, obstacles, taken, bounds, config } = input;
   const offset = input.offset ?? { dx: 0, dy: 0 };
   const manual = offset.dx !== 0 || offset.dy !== 0;
+  const countCollisions = collisionCounter({
+    index: input.index,
+    obstacles,
+    taken,
+    bounds,
+    clearance: config.annotClearance,
+  });
 
   const candidates = spanCandidates(span, size, config).map((candidate) => ({
     ...candidate,
@@ -338,7 +357,7 @@ export function placeSpanLabel(input) {
       center,
       side: base.side,
       candidateIndex: index,
-      collisions: countCollisions(center, size, obstacles, taken, bounds, config),
+      collisions: countCollisions(boxAround(center, size)),
       manual: true,
     };
   }
@@ -346,7 +365,7 @@ export function placeSpanLabel(input) {
   let best = null;
   let bestIndex = 0;
   candidates.forEach((candidate, index) => {
-    const collisions = countCollisions(candidate.center, size, obstacles, taken, bounds, config);
+    const collisions = countCollisions(boxAround(candidate.center, size));
     if (!best || collisions < best.collisions) {
       best = { ...candidate, collisions };
       bestIndex = index;
@@ -373,28 +392,7 @@ function clampIndex(value, length) {
   return value;
 }
 
-/** Count how many obstacles a candidate box overlaps. */
-function countCollisions(center, size, obstacles, taken, bounds, config) {
-  const box = boxAround(center, size);
-  let count = 0;
-  for (const obstacle of obstacles) {
-    if (annotateCollides(box, obstacle.box ?? obstacle, config.annotClearance)) count += 1;
-  }
-  for (const other of taken) {
-    if (annotateCollides(box, other, config.annotClearance)) count += 1;
-  }
-  // Out of bounds counts as a collision, so a candidate that would be clipped by
-  // the sheet loses to one that fits.
-  if (
-    box.x1 < 0 ||
-    box.y1 < 0 ||
-    box.x2 > bounds.width ||
-    box.y2 > bounds.height
-  ) {
-    count += 1;
-  }
-  return count;
-}
+
 
 /**
  * Everything one annotation needs once it has been placed.

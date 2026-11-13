@@ -22,7 +22,7 @@ The full documentation set lives in [`documentation/`](documentation/README.md):
 | [Persistence and project format](documentation/05-persistence.md) | The exact JSON field reference, migrations, refusal codes, recovery |
 | [Identity and network data](documentation/06-identity-and-data.md) | Asset ids, designations, loads, span lengths, reconciliation |
 | [Rendering and export](documentation/07-rendering-and-export.md) | Profiles, the four page layouts, fit-to-sheet, the `c39eca9` regression |
-| [Testing and development](documentation/08-testing.md) | Commands, the 564 Node tests and 355 browser checks, conventions |
+| [Testing and development](documentation/08-testing.md) | Commands, the 581 Node tests and 355 browser checks, conventions |
 | [Feature and validation matrix](documentation/09-feature-matrix.md) | Every capability with its verification status |
 | [Known limitations](documentation/10-limitations.md) | What it cannot do, and what has not been validated |
 | [Findings](documentation/findings.md) | Defects and gaps recorded but deliberately not fixed |
@@ -311,7 +311,7 @@ calculates a coordinate, a pole or a junction of its own.
 npm test
 ```
 
-Uses Node's built-in test runner; no dependencies to install. **564 tests across 35
+Uses Node's built-in test runner; no dependencies to install. **581 tests across 36
 files** cover cardinal directions, span and pole counts, alphabetical labelling, TC
 identification and naming, endpoint reuse, shared-node merging, partial and complete
 overlap, intersections, multiple branches, label visibility per profile, TC retention
@@ -366,10 +366,11 @@ Measured, not asserted: no threshold, no gate, and nothing in the test suite rea
 these numbers. On the machine in
 [the baseline](documentation/11-performance-baseline.md#2-the-environment-measured)
 the bundled 34-span example opens in ~0.1 s and costs ~7 ms to edit, while a
-fully-surveyed 501-span drawing opens in ~0.5 s and costs ~225 ms per edit. The
-measurements also established that annotation placement is quadratic in the number of
-labels — recorded as [F13](documentation/findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels),
-measured and deliberately not fixed in the act that found it.
+fully-surveyed 501-span drawing opens in ~0.4 s and costs ~151 ms per edit. The
+measurements also established that annotation placement was quadratic in the number of
+labels; that was [F13](documentation/findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels),
+now closed by a per-scene spatial index that left every placement
+[byte-identical](documentation/12-annotation-placement.md).
 
 ### Print dialog smoke test
 

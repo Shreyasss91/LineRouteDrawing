@@ -4,7 +4,7 @@
 
 1. [Requirements](#1-requirements)
 2. [Commands](#2-commands)
-3. [The Node suite: 564 tests in 35 files](#3-the-node-suite-564-tests-in-35-files)
+3. [The Node suite: 581 tests in 36 files](#3-the-node-suite-581-tests-in-36-files)
 4. [The browser suite: 355 checks in 17 sections](#4-the-browser-suite-355-checks-in-17-sections)
 5. [The headed print smoke test](#5-the-headed-print-smoke-test)
 6. [Annotation placement: the exact-output contract](#6-annotation-placement-the-exact-output-contract)
@@ -32,15 +32,15 @@
 
 | Command | What it does | Expected result |
 | --- | --- | --- |
-| `npm test` | `node --test "test/*.test.js"` | **564 tests, 564 pass, 0 fail** |
+| `npm test` | `node --test "test/*.test.js"` | **581 tests, 581 pass, 0 fail** |
 | `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **355/355 checks pass** |
 | `npm run benchmark` | `node scripts/benchmark.mjs` — times the DOM-free phases on four fixed drawings | a table of medians and p95; **no pass/fail** |
 | `npm run benchmark:browser` | `node scripts/benchmark-browser.mjs` — drives the real page in Chrome | cold start and recompute timings; needs Playwright like the browser suite |
 | `npm run test:print:headed` | `node scripts/print-dialog-smoke.mjs` — opens a real print dialog | manual, needs an interactive terminal |
 | `npm run serve` | static server for manual use | serve locally, then open the printed URL |
 
-Verified on this working tree: `npm test` → `tests 564, pass 564, fail 0`; the suite
-takes about 2.3 s.
+Verified on this working tree: `npm test` → `tests 581, pass 581, fail 0`; the suite
+takes about 2.5 s.
 
 `npm run test:browser` requires the Playwright browser binaries. `test-browser.mjs`
 resolves Playwright at runtime (`loadPlaywright()`) and fails with a message naming the
@@ -49,7 +49,7 @@ install command if it is absent, rather than a stack trace.
 The browser suite writes its downloads and diagnostics into a temp directory; nothing
 it produces is committed.
 
-## 3. The Node suite: 564 tests in 35 files
+## 3. The Node suite: 581 tests in 36 files
 
 The whole domain layer is DOM-free, so it is tested directly under Node. Files and
 their test counts:
@@ -80,6 +80,7 @@ their test counts:
 | `print_input.test.js` | 11 | `classifyTerminalInput` and the interactive-input helpers |
 | `print_tty_state.test.js` | 21 | Terminal/`--layout` argument handling for the headed smoke test |
 | `project.test.js` | 29 | Serialise/parse round trip, every refusal code, `sameAuthoredProject`, warnings, and load-id canonicalisation (tests 23–29: alias normalised, canonical preserved, unresolved kept verbatim, input immutability, save/reload, TC eligibility still enforced) |
+| `spatial_index.test.js` | 17 | The broad phase of [F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels): the grid's count against the exhaustive oracle on every real drawing (every placed position plus 300 generated boxes each, with the frame penalty accounted for separately); boxes spanning many cells found from every cell they touch; an obstacle exactly on a cell boundary found from both sides; negative coordinates and boxes straddling the origin; a duplicated obstacle still counting twice; the same question asked repeatedly giving the same answer (the per-query stamp); an index being local to one pass; counts being independent of the cell size, so no tuning constant leaks into placement; a deterministic 400-obstacle unaligned sweep at four cell sizes; `RangeError` for a bad clearance or cell size; the counting helper applying the frame penalty; and the layer's obstacle set being non-trivial |
 | `reconcile.test.js` | 7 | Unresolved records: found, never reattached, never silently moved |
 | `recovery.test.js` | 10 | Damaged stored text is preserved, session usable, both discard paths confirmed |
 | `render.test.js` | 12 | SVG structure, escaping, draw order, standalone vs inline, background |
@@ -226,6 +227,17 @@ node -e "import('./test/support/placement_capture.mjs').then(async (c) => {
 A diff in those files is a diff in what the tool draws. It is never a fixture to "update"
 to make a build green.
 
+**The fix itself** then replaced the scan with a per-scene uniform grid
+([12-annotation-placement.md](12-annotation-placement.md)) and was accepted only because
+every one of those fixtures still matched: `test/spatial_index.test.js` compares the grid's
+count with the oracle over the real obstacle sets and over adversarial geometry (multi-cell
+boxes, cell boundaries, negative coordinates, degenerate boxes, duplicated obstacles, an
+unaligned sweep), and asserts that the answer does not depend on the cell size. Two
+deliberately wrong broad phases were applied and reverted — a query cell range shrunk by one
+cell (both equivalence tests fail on all four drawings) and obstacles deduplicated on insert
+(the duplicate-count test fails) — so the suite is known to be able to see this class of
+defect rather than merely passing.
+
 ## 7. Test strategy: what is tested and why
 
 The suite is organised around **contracts**, not around files:
@@ -248,7 +260,7 @@ The suite is organised around **contracts**, not around files:
    `geometry.test.js` pin the example drawing at 34 nodes / 33 edges / the endpoint
    set, so a change in the walk shows up immediately.
 6. **DOM-free by construction.** Nothing in `test/` loads a browser; nothing in
-   `src/geometry/` or `src/data/` needs one. This is why 564 tests run in ~2.3 s.
+   `src/geometry/` or `src/data/` needs one. This is why 581 tests run in ~2.5 s.
 
 ### Performance is measured, not guarded
 

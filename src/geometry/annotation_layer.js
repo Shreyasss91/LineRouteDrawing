@@ -23,6 +23,7 @@ import {
   placeSpanLabel,
 } from './annotations.js';
 import { boxesOverlap } from './collide.js';
+import { createObstacleIndex } from './spatial_index.js';
 import { buildAssetRegistry } from './assets.js';
 import { loadCalloutLines } from '../data/schedules.js';
 
@@ -150,6 +151,17 @@ export function buildAnnotationLayer(input) {
   const obstacles = [...lineBoxes, ...markerBoxes];
   const taken = [];
 
+  // One broad-phase index for this scene (F13). It is built here, seeded with the static
+  // obstacles in the order they were collected, and then grows with each accepted
+  // annotation. It is local to this call and to nothing else: no module-level state, so two
+  // scenes cannot affect each other and a reload starts from an empty grid.
+  //
+  // The index never decides anything. It narrows which obstacles are worth asking about;
+  // `annotateCollides` still answers every one of them, so the placements this pass
+  // produces are the placements the exhaustive scan produced.
+  const index = createObstacleIndex({ clearance: config.annotClearance });
+  for (const obstacle of obstacles) index.insert(obstacle.box ?? obstacle);
+
   // Export visibility is decided HERE, once, from the profile - not inside a renderer.
   // Both the SVG and the PDF draw whatever this layer hands them, so a switch applied
   // at this single point cannot drift between the two formats. Nothing is deleted: the
@@ -184,6 +196,7 @@ export function buildAnnotationLayer(input) {
       bounds,
       offset: loadPlacements[nodeId],
       config,
+      index,
     });
 
     const callout = annotation(
@@ -212,13 +225,16 @@ export function buildAnnotationLayer(input) {
       tipY: callout.leader.tipY + padIn,
     };
     callout.arrow = arrowHead(callout.leader, config);
-    // The callout claims its box for the span labels.
-    taken.push({
+    // The callout claims its box for the span labels, and enters the index at the same
+    // moment so the next annotation sees exactly what `taken` holds - no earlier, no later.
+    const claimed = {
       x1: placement.center.x - size.width / 2,
       y1: placement.center.y - size.height / 2,
       x2: placement.center.x + size.width / 2,
       y2: placement.center.y + size.height / 2,
-    });
+    };
+    taken.push(claimed);
+    index.insert(claimed);
     callouts.push(callout);
   }
 
@@ -251,6 +267,7 @@ export function buildAnnotationLayer(input) {
       bounds,
       offset: spanPlacements[asset.id],
       config,
+      index,
     });
 
     const spanAnnot = annotation(
@@ -265,12 +282,14 @@ export function buildAnnotationLayer(input) {
     spanAnnot.b = b;
     spanAnnot.measured = measured;
     spans.push(spanAnnot);
-    taken.push({
+    const claimed = {
       x1: placement.center.x - size.width / 2,
       y1: placement.center.y - size.height / 2,
       x2: placement.center.x + size.width / 2,
       y2: placement.center.y + size.height / 2,
-    });
+    };
+    taken.push(claimed);
+    index.insert(claimed);
   }
 
   // ---- The incomplete-data notice ----

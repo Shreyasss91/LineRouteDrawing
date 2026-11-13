@@ -136,7 +136,7 @@ not been demonstrated.
 
 ### Verified automatically
 
-- The whole domain layer: **564 Node tests across 35 files**, all passing on the
+- The whole domain layer: **581 Node tests across 36 files**, all passing on the
   current working tree.
 - The application in a real browser: **355 checks in 17 sections**, all passing,
   including one-page print fit for **all four layouts** and the TC geometry on the
@@ -157,7 +157,7 @@ not been demonstrated.
 | **Firefox and Safari** | Never run | Medium — no browser-specific code, but untested |
 | **Touch devices / pinch zoom** | Pointer events are used; pinch-to-zoom is not implemented | Medium on tablets |
 | **Locale decimal input** | `<input type="number">` treats `,` differently per browser | Low |
-| **Large drawings** | No performance baseline; no test beyond the example's 34 nodes | Medium — annotation placement is a search, and its cost at hundreds of nodes is unknown |
+| **Large drawings** | Measured on four fixed datasets, not on arbitrary drawings | Low — the baseline covers 34–501 spans ([11-performance-baseline.md](11-performance-baseline.md)) |
 | **Keyboard-only operation** | Forms are native HTML but never tested without a pointer | Medium |
 
 ### Not validated at all
@@ -232,4 +232,4 @@ places an operator looks; nothing is clamped, rounded or dropped on the way in.
 | Annotation dragging is per-record | There is no way to select several callouts and move them together, and no reset-to-automatic |
 | Export switches are per project | `exportLoads`/`exportLengths` are saved with the project and travel with the file, so a colleague opening your file exports the same sheet you intended |
 | The completeness notice is preview-only | It is never exported, so a PDF does not say that some spans are unmeasured |
-| Editing a fully-surveyed 500-span drawing is slow | ~225 ms of main-thread work per edit on the machine in [the baseline](11-performance-baseline.md#2-the-environment-measured), because annotation placement is quadratic in the number of labels ([F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels)). Below a few hundred spans it is imperceptible |
+| Editing a fully-surveyed 500-span drawing is noticeable | ~151 ms of main-thread work per edit on the machine in [the baseline](11-performance-baseline.md#2-the-environment-measured), down from ~225 ms after the spatial index of [F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels). Most of what remains is SVG building, DOM insertion and serialisation, not placement; below a few hundred spans it is imperceptible |

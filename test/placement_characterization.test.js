@@ -35,6 +35,7 @@ import {
   buildSceneFor,
   canonicalPlacements,
   captureProject,
+  parseRecord,
   placementLines,
   recordLines,
 } from './support/placement_capture.mjs';
@@ -64,16 +65,6 @@ function firstDifference(expected, actual) {
   return null;
 }
 
-/** A record split into its columns, by the documented order. */
-function columns(line) {
-  const parts = line.split('|');
-  const out = {};
-  CAPTURE_COLUMNS.forEach((name, i) => {
-    out[name] = parts[i];
-  });
-  return out;
-}
-
 /** The frame-relative centre the layout pass solved in. */
 function frameCenter(record, padding) {
   return { x: Number(record.centerX) - padding, y: Number(record.centerY) - padding };
@@ -95,7 +86,7 @@ function replayCollisions(project, capture) {
   };
   const records = recordLines(capture)
     .filter((line) => !line.startsWith('notice|') && !line.startsWith('completeness|'))
-    .map(columns);
+    .map(parseRecord);
   const taken = [];
   const results = [];
   for (const record of records) {
@@ -174,7 +165,7 @@ test('the capture itself is complete enough to be evidence', async (t) => {
       const seen = new Set();
       const annotations = records
         .filter((line) => !line.startsWith('notice|') && !line.startsWith('completeness|'))
-        .map(columns);
+        .map(parseRecord);
       for (const record of annotations) {
         assert.ok(record.id, 'a record has no identity');
         assert.equal(
@@ -205,7 +196,7 @@ test('the capture itself is complete enough to be evidence', async (t) => {
 test('the annotated benchmark drawing is the one that exercises callouts', () => {
   const records = recordLines(golden('D-surveyed'))
     .filter((line) => !line.startsWith('notice|') && !line.startsWith('completeness|'))
-    .map(columns);
+    .map(parseRecord);
   assert.equal(records.filter((r) => r.kind === 'load').length, 50, 'load callout count changed');
   assert.equal(records.filter((r) => r.kind === 'span').length, 501, 'span label count changed');
   assert.equal(
@@ -218,7 +209,7 @@ test('the annotated benchmark drawing is the one that exercises callouts', () =>
 test('the annotated benchmark drawing really places its manual offsets', () => {
   const records = recordLines(golden('D-surveyed'))
     .filter((line) => !line.startsWith('notice|') && !line.startsWith('completeness|'))
-    .map(columns);
+    .map(parseRecord);
   const manualLoads = records.filter((r) => r.kind === 'load' && r.manual === 'true');
   const manualSpans = records.filter((r) => r.kind === 'span' && r.manual === 'true');
   assert.equal(manualLoads.length, 25, 'the manual load-offset count changed');

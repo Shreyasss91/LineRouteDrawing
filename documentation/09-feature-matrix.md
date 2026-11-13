@@ -212,8 +212,9 @@ now known and how it was obtained.
 | Dataset sizes the numbers refer to | Verified | `benchmark_datasets.test.js` (10 tests) | Counts only; timings vary by machine |
 | Bundled example (34 spans) opens and edits without perceptible delay | Verified | baseline: 0.6 ms end to end, 6.8 ms recompute | Measured headless |
 | 500-span drawing opens in under half a second | Verified | baseline: 0.23 s unmeasured, 0.47 s fully surveyed (cold start to drawing) | This machine; not a promise |
-| Editing a 500-span drawing | Verified | baseline: 92 ms recompute unmeasured, 225 ms fully surveyed | Noticeable on every edit at the surveyed size |
-| Annotation placement scales linearly | **Unsupported** | `npm run benchmark -- --scaling`: ×3.4 per doubling at 400 spans | Quadratic; recorded as [F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels) |
+| Editing a 500-span drawing | Verified | after the F13 index: 62 ms recompute unmeasured, 151 ms fully surveyed | Still noticeable at the surveyed size; the remaining cost is not placement |
+| Annotation placement scales sub-quadratically | Verified | `npm run benchmark -- --scaling`: 1.02 → 0.66 ms at 50 spans, 75.66 → 22.60 ms at 800; 3.2x faster at 501 spans | Per-span cost still rises above ~400 spans; recorded as the residual note in [F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels) |
+| Placement results unchanged by the speed-up | Verified | committed capture of all four drawings (byte for byte), the exhaustive oracle, and two mutations ([Testing §6](08-testing.md#6-annotation-placement-the-exact-output-contract)) | Only the four baseline drawings; other projects are covered by the same code path, not by a fixture |
 | PDF, print and long-session behaviour are timed | **Unsupported** | — | Deliberately excluded; reasons in baseline §10 |
 | A performance regression fails the suite | **Unsupported** | — | Machine-specific numbers are not a gate |
 
@@ -233,5 +234,7 @@ Collected from the tables above — these are the honest gaps:
    regression gate exists — the baseline is a measurement, not a threshold.
 
 Performance is no longer on this list as an *unquantified* gap: it is measured, and the
-one genuinely slow path (annotation placement) is recorded as
-[F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels).
+one genuinely slow path (annotation placement) was indexed under
+[F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels). What
+remains above ~400 spans is the growing number of labels competing for the same narrow strip,
+not a missing index.

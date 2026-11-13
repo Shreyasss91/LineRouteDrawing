@@ -140,7 +140,7 @@ had open (see [Persistence and project format](05-persistence.md)).
 ## Running the tests
 
 ```sh
-npm test                    # 564 Node tests, no dependencies required
+npm test                    # 581 Node tests, no dependencies required
 npm run test:browser        # 355 browser checks; needs Playwright + Chrome
 npm run test:print:headed   # manual print-dialog check; needs a real terminal
 ```
@@ -197,6 +197,7 @@ Confirmed limitations, and why each exists, are in
 | [09-feature-matrix.md](09-feature-matrix.md) | Consolidated capability / status / evidence matrix. |
 | [10-limitations.md](10-limitations.md) | Confirmed limitations and extension boundaries. |
 | [11-performance-baseline.md](11-performance-baseline.md) | What a drawing costs on four fixed datasets, how it was measured, and how to re-measure it. |
+| [12-annotation-placement.md](12-annotation-placement.md) | How a callout or span label's position is chosen, the exact clash rule, and the per-scene spatial index (F13). |
 | [findings.md](findings.md) | Discrepancies found during documentation, recorded as observations. |
 
 ## Glossary

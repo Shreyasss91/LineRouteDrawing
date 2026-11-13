@@ -101,6 +101,7 @@ flowchart TD
         MRK["geometry/markers.js"]
         CLR["geometry/clearance.js"]
         COL["geometry/collide.js"]
+        SPX["geometry/spatial_index.js"]
         ANN["geometry/annotations.js"]
         ANL["geometry/annotation_layer.js"]
         SCH["data/schedules.js"]
@@ -178,8 +179,9 @@ Key properties:
 | [geometry/markers.js](../src/geometry/markers.js) | Marker outlines (TC triangle, FPB rectangle), pixel-space direction vectors, polygon clipping | marker primitives | vertices, `points` strings, clipped segment list | config |
 | [geometry/clearance.js](../src/geometry/clearance.js) | Derives the minimum workable span spacing from marker sizes | config overrides | `requiredSpanLength()`, `requiredClearanceDistance()`, `checkSpanClearance()`, message | config |
 | [geometry/collide.js](../src/geometry/collide.js) | Box/segment overlap tests used by annotation placement | boxes, segments | booleans, overlap area, inflated box | none |
-| [geometry/annotations.js](../src/geometry/annotations.js) | Candidate positions, text measurement, callout/span-label placement, leader and arrowhead geometry | node/span positions, obstacles, bounds, manual offsets | placement + annotation records | collide |
-| [geometry/annotation_layer.js](../src/geometry/annotation_layer.js) | Builds all annotations for a scene, in a fixed order, applying the profile's export switches and the completeness notice | network, profile, config, placed primitives, measured data | `{callouts, spans, obstacles, notice, completeness}` | annotations, collide, assets, schedules |
+| [geometry/spatial_index.js](../src/geometry/spatial_index.js) | Broad phase for annotation collision counting: a uniform grid per placement pass, plus the frame penalty. Indexes obstacles; decides nothing ([Annotation placement](12-annotation-placement.md)) | boxes, clearance, bounds | `createObstacleIndex()`, `collisionCounter()`, counts | collide |
+| [geometry/annotations.js](../src/geometry/annotations.js) | Candidate positions, text measurement, callout/span-label placement, leader and arrowhead geometry | node/span positions, obstacles (or a shared index), bounds, manual offsets | placement + annotation records | spatial_index |
+| [geometry/annotation_layer.js](../src/geometry/annotation_layer.js) | Builds all annotations for a scene, in a fixed order, applying the profile's export switches and the completeness notice; owns the per-scene index | network, profile, config, placed primitives, measured data | `{callouts, spans, obstacles, notice, completeness}` | annotations, collide, spatial_index, assets, schedules |
 | [geometry/scene.js](../src/geometry/scene.js) | Builds the normalized pixel-space scene: lines, poles, TC, FPB, labels, annotations, metrics | network, profile, config overrides, measured data | scene object | config, network, assets, markers, annotation_layer, schedules |
 | [data/schedules.js](../src/data/schedules.js) | Load records and span-length measurements as pure data with validation; no totals, no conversions | loads/existing maps, raw values | new lists/maps, verdicts, callout lines | — |
 | [data/schedule_io.js](../src/data/schedule_io.js) | CSV/TSV parse and format, staged import plans, apply functions | text, current data, lookup functions | rows, plans `{added, updated, unchanged, removed, unresolved}`, refusal `{code, message, details}` | schedules |

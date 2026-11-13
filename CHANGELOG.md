@@ -15,6 +15,74 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ## Unreleased
 
+### Performance
+
+- **Annotation placement no longer rescans every obstacle for every candidate (closes
+  finding F13).** `countCollisions()` walked the whole static obstacle list *and* the whole
+  list of labels already placed, for each candidate position of each annotation, so a
+  501-span drawing did `n x candidates x (obstacles + taken)` work: 13.0 ms of the 14.2 ms
+  scene build, and the reason a recompute of the fully surveyed drawing blocked the main
+  thread for ~225 ms. It now asks a **per-scene uniform grid**
+  ([src/geometry/spatial_index.js](src/geometry/spatial_index.js)) built once per placement
+  pass (128 px cells, chosen by measurement over 24–384 px), seeded with the static obstacles
+  and grown with each accepted annotation. The grid is broad phase only: it proposes entries,
+  and `annotateCollides` - unchanged - decides each one. The exhaustive loop is gone from
+  `src/`, so production has one implementation and the tests have the oracle.
+
+  **The placement contract was fixed first, and came through intact.** All four baseline
+  drawings - preview plus the `pdf`, `svg` and `print` profiles - are **byte-identical** to
+  the captures recorded from the unoptimized code in `cb4d39d`: identity, chosen candidate,
+  centre, collision count, manual flag, leader and arrowhead. Candidate generation, scoring,
+  the first-minimum tie-break, the pass order (callouts, then span labels, then the notice),
+  manual offsets and every renderer are untouched.
+
+  **After** (median of five scaling runs, same machine and scripts):
+
+  | Spans | Placement before | Placement after | Speed-up |
+  | ---: | ---: | ---: | ---: |
+  | 50 | 1.02 ms | 0.66 ms | 1.5x |
+  | 100 | 1.99 ms | 1.32 ms | 1.5x |
+  | 200 | 5.60 ms | 2.75 ms | 2.0x |
+  | 400 | 20.61 ms | 8.84 ms | 2.3x |
+  | 800 | 75.66 ms | 22.60 ms | 3.3x |
+
+  On the fixed drawings: `place annotations` 13.05 -> 4.07 ms (C-large, 3.2x) and
+  13.00 -> 4.20 ms (D-surveyed, 3.1x); full pipeline 17.20 -> 8.94 ms and 18.53 -> 10.31 ms.
+  The 34- and 96-span drawings are unchanged within noise (0.20 ms), so the index costs
+  nothing worth naming on a small drawing. In the browser a recompute went from 74.5 to
+  62.6 ms (C) and 165.1 to 151.2 ms (D) - less than the placement speed-up, because most of a
+  rebuild is SVG string building, DOM insertion, hit areas, the mini preview and
+  serialisation, not placement.
+
+  **Coverage.** New `test/spatial_index.test.js` - 17 tests: the grid's count against the
+  exhaustive oracle on every real drawing (every placed position plus 300 generated boxes
+  each), multi-cell boxes, cell boundaries, negative coordinates, degenerate boxes,
+  duplicated obstacles counting twice, repeated queries, per-pass locality, cell-size
+  invariance, a deterministic unaligned sweep at four cell sizes, and the `RangeError`
+  guards. `test/placement_characterization.test.js` 24 tests unchanged.
+
+  **Mutations.** Shrinking the query cell range by one cell makes both equivalence tests fail
+  on **all four** drawings and ten index tests fail; deduplicating obstacles on insert fails
+  the duplicate-count test. Both were restored byte-for-byte (`cmp` clean) and the suites
+  re-run green: `npm test` **581 tests in 36 files, 581 pass, 0 fail** (~2.5 s);
+  `npm run test:browser` **355/355 checks in 17 sections**.
+
+  **Not optimized, deliberately:** the candidate generators, the tie-break, the pass order,
+  rendering, export, PDF, print, the mini preview, serialisation and `app.js`. No tuning knob
+  was added. The remaining per-doubling growth above ~400 spans is the geometry of 501 labels
+  competing for one narrow strip - the grid buckets there grow with *n* - and is recorded in
+  [F13](documentation/findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels)
+  rather than chased, because going further would change *where labels go*.
+
+  Documentation: new [12-annotation-placement.md](documentation/12-annotation-placement.md)
+  (the design, the broad/narrow-phase split, why a grid per scene, the cell-size measurement,
+  the equivalence evidence, before/after results, what was not optimized, and how to change
+  the area safely); `11-performance-baseline.md` gains §7.1 with the after numbers and updated
+  user-facing ranges while keeping the original before-state tables; `03-architecture.md`
+  gains the module row; `09-feature-matrix.md` §11 records the verified scale-up and the
+  unchanged output; `10-limitations.md` restates the surveyed-drawing pause at 151 ms; counts
+  updated (581 Node tests in 36 files).
+
 ### Fixed
 
 - **A grandfathered route could be kept but not shortened, step by step (follow-up to

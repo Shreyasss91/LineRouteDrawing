@@ -24,7 +24,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F10](#f10-a-load-cannot-reach-a-tc-point-by-creation-move-edit-import-or-file) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — five guarded boundaries covering creation, move, route edit, import and file; fail-closed, each with executable evidence |
 | [F11](#f11-an-aliased-load-id-is-not-resolved-by-the-schedule-and-annotation-layers) | Alias identity handled inconsistently | Low | **Closed** — aliases canonicalised once at the validation boundary |
 | [F12](#f12-the-in-drawing-notice-overlay-intercepted-pointer-events-over-the-annotations-beneath-it) | Interaction | Low–Medium | **Closed** — the notice is now `pointer-events="none"`; 17 browser checks |
-| [F13](#f13-annotation-placement-is-quadratic-in-the-number-of-labels) | Scale | Medium | Open — measured, not fixed |
+| [F13](#f13-annotation-placement-is-quadratic-in-the-number-of-labels) | Scale | Medium | **Closed** — per-scene spatial index; 3.2x faster at 501 spans with byte-identical placement |
 
 ---
 
@@ -460,7 +460,8 @@ the test suite reads them.
 
 ## F13 — Annotation placement is quadratic in the number of labels
 
-**Status: open, recorded.** Found by the F9 baseline; not fixed, deliberately.
+**Status: closed.** Found by the F9 baseline, fixed with a per-scene spatial index; the
+placement contract was fixed before the change and is byte-identical after it.
 
 **Observed.** `npm run benchmark -- --scaling` grows a one-span-per-route chain and times
 placement alone:
@@ -487,23 +488,55 @@ it scores, and it is called for every annotation. With *n* annotations, ~1044 ob
 13.5 ms) and a large share of the 92 ms a recompute blocks the main thread for; on the
 fully surveyed drawing a recompute is 225 ms. Below a few hundred spans it is invisible.
 
-**Prerequisite landed.** The placement contract this fix must honour now exists:
-`test/placement_characterization.test.js` compares every placement in all four baseline
-drawings against fixtures recorded from this unoptimized code, and
+**Prerequisite, then the fix.** The contract was established first, in
+`cb4d39d`: `test/placement_characterization.test.js` compares every placement in all four
+baseline drawings against fixtures recorded from the *unoptimized* code, and
 `test/support/exhaustive_collisions.mjs` keeps the exhaustive scan as a test-only oracle
-([Testing §6](08-testing.md#6-annotation-placement-the-exact-output-contract)). Nothing
-about the cost has changed yet.
+([Testing §6](08-testing.md#6-annotation-placement-the-exact-output-contract)). Only then did
+the scan itself change.
 
-**Why it is not fixed here.** The F9 brief was measurement only, and the fix is not local:
-the candidate search would need obstacle indexing (a spatial grid or an interval index
-rebuilt per annotation) to become sub-linear. That is a real change with a real risk of
-altering placement decisions, and it needs the baseline numbers in hand to be judged — which
-is exactly what this act produced.
+**What changed.** `countCollisions()` no longer walks the lists. A new
+[src/geometry/spatial_index.js](../src/geometry/spatial_index.js) is a uniform grid of
+128 px cells, built **once per placement pass** in `buildAnnotationLayer()`, seeded with the
+static obstacles and grown with each accepted annotation. A query visits only the cells its
+grown box touches, and then puts every proposed entry through `annotateCollides`, unchanged.
+The index is broad phase only: it proposes, the exact predicate decides. The exhaustive loop
+is **gone from `src/`** — one implementation in production, the oracle in tests. Nothing
+about candidate generation, scoring, tie-breaking or pass order was touched
+([Annotation placement](12-annotation-placement.md) documents the design, the cell-size
+measurement and why a grid per scene was chosen over a tree or a global index).
 
-**Suggested direction** (not done): index the obstacles by grid cell per scene instead of
-scanning them per candidate, then re-run `npm run benchmark -- --scaling` and compare the
-medians. The placement results must be byte-identical for the four baseline datasets before
-and after, or the change has altered the drawing.
+**After.** Same machine, same scripts, same datasets (median of five scaling runs each):
+
+| Spans | Before | After | Speed-up |
+| ---: | ---: | ---: | ---: |
+| 50 | 1.02 ms | 0.66 ms | 1.5x |
+| 100 | 1.99 ms | 1.32 ms | 1.5x |
+| 200 | 5.60 ms | 2.75 ms | 2.0x |
+| 400 | 20.61 ms | 8.84 ms | 2.3x |
+| 800 | 75.66 ms | 22.60 ms | 3.3x |
+
+On the four fixed drawings `place annotations` fell from 13.05 to 4.07 ms (C-large) and from
+13.00 to 4.20 ms (D-surveyed), and the full pipeline from 17.2 to 8.9 ms and 18.5 to 10.3 ms;
+the 34- and 96-span drawings are unchanged within noise. In the browser a recompute went from
+74.5 to 62.6 ms (C) and 165.1 to 151.2 ms (D) — a smaller improvement than the placement
+figures *because* most of a rebuild is not placement (SVG string building, DOM insertion, hit
+areas, the mini preview, serialisation).
+
+**Equivalence evidence.** All four baseline drawings, preview plus the three export profiles,
+byte-identical against the pre-change capture; the oracle replays every recorded collision
+count; the grid is compared with the oracle over the real obstacle sets (every placed position
+plus 300 generated boxes per drawing) and over adversarial geometry (multi-cell boxes, cell
+boundaries, negative coordinates, degenerate boxes, duplicated obstacles, an unaligned sweep).
+Two mutations were applied and reverted: shrinking the query cell range by one cell fails both
+equivalence tests on **all four** drawings plus ten index tests, and deduplicating obstacles on
+insert fails the duplicate-count test. Both restored byte-for-byte (`cmp` clean).
+
+**Residual, recorded not chased.** The cost per span still rises above ~400 spans, because on
+a 501-span chain every label competes for the same narrow strip, so the grid buckets in that
+strip grow with *n* and each query walks them. Going further would mean changing *where labels
+go* (spacing candidates out, or grouping labels per span), which is a placement-policy change
+this finding did not authorize.
 
 ## F10 — A load cannot reach a TC point by creation, move, edit, import or file
 

@@ -180,6 +180,21 @@ export function captureProject(project, profileId = 'preview', options = {}) {
 }
 
 /**
+ * Split one record line into its named columns.
+ *
+ * @param {string} line Record line from a capture.
+ * @returns {object} Column name to text.
+ */
+export function parseRecord(line) {
+  const parts = line.split('|');
+  const out = {};
+  CAPTURE_COLUMNS.forEach((name, i) => {
+    out[name] = parts[i];
+  });
+  return out;
+}
+
+/**
  * The record lines of a capture: everything except the header comments.
  *
  * @param {string} text Canonical capture.
