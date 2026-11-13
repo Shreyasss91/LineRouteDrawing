@@ -1567,6 +1567,9 @@ try {
 
   const stageBox = await page.locator('#preview-stage').boundingBox();
   const beforePan = await measureCallout();
+  // Snapshot the saved offsets directly around the pan, so "panning moves the view and
+  // not the label" is proved rather than inferred from the viewport numbers alone.
+  const placementsBeforePan = await readPlacements();
   await page.mouse.move(stageBox.x + 15, stageBox.y + 15);
   await page.mouse.down();
   await page.mouse.move(stageBox.x + 55, stageBox.y + 40);
@@ -1574,11 +1577,18 @@ try {
   await page.mouse.up();
   await page.waitForTimeout(250);
   const afterPan = await measureCallout();
+  const placementsAfterPan = await readPlacements();
   check(
     'dragging the stage pans the viewport',
     Math.abs(afterPan.panX - beforePan.panX) > 20 && Math.abs(afterPan.panY - beforePan.panY) > 10,
     `pan ${beforePan.panX.toFixed(1)},${beforePan.panY.toFixed(1)} -> ` +
       `${afterPan.panX.toFixed(1)},${afterPan.panY.toFixed(1)}`,
+  );
+  check(
+    'panning alone leaves every saved manual offset byte-identical',
+    JSON.stringify(placementsBeforePan) === JSON.stringify(placementsAfterPan) &&
+      Object.keys(placementsBeforePan).length > 0,
+    `${JSON.stringify(placementsBeforePan)} -> ${JSON.stringify(placementsAfterPan)}`,
   );
   const afterPanDrag = await dragCallout({ dx: -34, dy: -17 });
   check(
@@ -1656,12 +1666,28 @@ try {
   /* ---------------- A click is not a drag ---------------- */
 
   const beforeClick = await readPlacements();
-  const clickTarget = await measureCallout();
-  await page.mouse.move(Math.round(clickTarget.screen.x), Math.round(clickTarget.screen.y));
-  await page.mouse.down();
-  await page.waitForTimeout(60);
-  await page.mouse.up();
-  await page.waitForTimeout(400);
+  // Aim through the same grab-point search the drags use, so the click is proved to land
+  // on the callout itself. The plate's geometric centre can be covered by other
+  // annotation text, and a click there would be a click on something else entirely -
+  // which would make this check pass for the wrong reason.
+  const clickGrab = await findGrabPoint(dragNodeId);
+  const clickHitOwner = await page.evaluate((point) => {
+    if (!point) return null;
+    const el = document.elementFromPoint(point.x, point.y);
+    return el?.closest?.('[data-annot-id]')?.getAttribute('data-annot-id') ?? null;
+  }, clickGrab);
+  check(
+    'the click target is the callout itself, not whatever covers its centre',
+    clickGrab !== null && clickHitOwner === dragNodeId,
+    `point=${JSON.stringify(clickGrab)} owner=${clickHitOwner}`,
+  );
+  if (clickGrab) {
+    await page.mouse.move(clickGrab.x, clickGrab.y);
+    await page.mouse.down();
+    await page.waitForTimeout(60);
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+  }
   check(
     'a click on a callout is not recorded as a drag',
     JSON.stringify(await readPlacements()) === JSON.stringify(beforeClick),
@@ -1702,6 +1728,268 @@ try {
     JSON.stringify(placementsAfterSecondLoad),
   );
   /* ---------------- Spreadsheet workflow ---------------- */
+
+  section('The incomplete-measurement notice does not block labels');
+
+  // The notice is a filled band added after the callouts so it can claim a clear strip.
+  // That also put it above them in the hit-test order, and because it had default
+  // pointer behaviour a press on a label that happened to sit under the band was a press
+  // on the notice: no annotation was found, so no drag started, and the event fell
+  // through to the stage and panned the drawing. This section drives that exact
+  // situation through the real UI and then proves the press reaches the label again.
+  await fresh(page, base);
+  await page.click('#btn-clear');
+  await page.waitForTimeout(250);
+  await addRoute(page, { from: 'origin', direction: 'south', spans: 2 });
+  const noticeRows = await readRouteRows(page);
+  const noticeNodeId = `dst:${noticeRows[0].id}`;
+  await page.click('#tab-loads');
+  await addLoad(page, { nodeId: noticeNodeId, value: 40, unit: 'kVA' });
+  await page.click('#btn-fit');
+  await page.waitForTimeout(350);
+  await page.mouse.move(20, 20);
+  await page.waitForTimeout(120);
+
+  const noticeState = () =>
+    page.evaluate(() => {
+      const canvas = document.querySelector('#preview-canvas');
+      const svg = canvas.querySelector('svg');
+      const group = svg?.querySelector('#notice') ?? null;
+      const rect = group?.querySelector('rect') ?? null;
+      const box = rect ? rect.getBoundingClientRect() : null;
+      const canvasBox = canvas.getBoundingClientRect();
+      const stageBox = document.querySelector('#preview-stage').getBoundingClientRect();
+      return {
+        present: Boolean(group),
+        text: group?.querySelector('text')?.textContent?.trim() ?? null,
+        pointerEvents: group ? getComputedStyle(group).pointerEvents : null,
+        rect: box ? { x: box.x, y: box.y, w: box.width, h: box.height } : null,
+        canvas: { x: canvasBox.x, y: canvasBox.y, w: canvasBox.width, h: canvasBox.height },
+        stage: { x: stageBox.x, y: stageBox.y, w: stageBox.width, h: stageBox.height },
+      };
+    });
+
+  /** The topmost element at a screen point and the annotation group it belongs to. */
+  const hitOwnerAt = (x, y) =>
+    page.evaluate(
+      (point) => {
+        const el = document.elementFromPoint(point.x, point.y);
+        return {
+          tag: el?.tagName ?? null,
+          group: el?.parentElement?.id ?? null,
+          owner: el?.closest?.('[data-annot-id]')?.getAttribute('data-annot-id') ?? null,
+        };
+      },
+      { x, y },
+    );
+
+  const notice0 = await noticeState();
+  check(
+    'the incomplete-measurement notice is drawn',
+    notice0.present === true && /Span measurements incomplete/.test(notice0.text ?? ''),
+    JSON.stringify({ present: notice0.present, text: notice0.text }),
+  );
+  // The whole point of the fix: visible to the reader, invisible to the pointer.
+  check(
+    'the notice is presentational, not interactive',
+    notice0.pointerEvents === 'none',
+    String(notice0.pointerEvents),
+  );
+
+  // Park the label inside the notice band with a real drag. The target is derived from
+  // the band and the canvas, not from hand-picked pixels.
+  const parkTarget = {
+    x: Math.round(Math.min(notice0.canvas.x + notice0.canvas.w, notice0.rect.x + notice0.rect.w) - 55),
+    y: Math.round(notice0.rect.y + notice0.rect.h / 2),
+  };
+  const parkFrom = await findGrabPoint(noticeNodeId);
+  check(
+    'the label can be grabbed before it moves under the notice',
+    parkFrom !== null,
+    JSON.stringify(parkFrom),
+  );
+  if (parkFrom) {
+    await page.mouse.move(parkFrom.x, parkFrom.y);
+    await page.mouse.down();
+    for (let s = 1; s <= 10; s += 1) {
+      await page.mouse.move(
+        parkFrom.x + Math.round(((parkTarget.x - parkFrom.x) * s) / 10),
+        parkFrom.y + Math.round(((parkTarget.y - parkFrom.y) * s) / 10),
+      );
+      await page.waitForTimeout(15);
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+  }
+
+  const under = await noticeState();
+  const centreAt = () =>
+    page.evaluate(() => {
+      const plate = document.querySelector('#preview-canvas rect.callout-plate');
+      const box = plate.getBoundingClientRect();
+      return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
+    });
+  const underCentre = await centreAt();
+  const underHit = await hitOwnerAt(underCentre.x, underCentre.y);
+  check(
+    'the label now lies under the notice band',
+    Boolean(under.rect) &&
+      underCentre.x > under.rect.x &&
+      underCentre.x < under.rect.x + under.rect.w &&
+      underCentre.y > under.rect.y &&
+      underCentre.y < under.rect.y + under.rect.h,
+    `point=${JSON.stringify(underCentre)} band=${JSON.stringify(under.rect)}`,
+  );
+  check(
+    'the notice no longer takes the hit',
+    underHit.owner === noticeNodeId,
+    `${underHit.tag} in #${underHit.group} owner=${underHit.owner}`,
+  );
+
+  /* ---------------- A covered label still drags, and the view does not move ---------------- */
+
+  const coveredBefore = await measureCallout();
+  const coveredPlacementsBefore = await readPlacements();
+  const coveredLoadsBefore = (await readSavedProject(page))?.loads ?? [];
+  const coveredGrab = await findGrabPoint(noticeNodeId);
+  check(
+    'the covered label is still grabbable',
+    coveredGrab !== null,
+    JSON.stringify(coveredGrab),
+  );
+
+  const COVERED_DX = -46;
+  const COVERED_DY = -22;
+  if (coveredGrab) {
+    await page.mouse.move(coveredGrab.x, coveredGrab.y);
+    await page.mouse.down();
+    for (let s = 1; s <= 10; s += 1) {
+      await page.mouse.move(
+        coveredGrab.x + Math.round((COVERED_DX * s) / 10),
+        coveredGrab.y + Math.round((COVERED_DY * s) / 10),
+      );
+      await page.waitForTimeout(15);
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+  }
+
+  const coveredAfter = await measureCallout();
+  const coveredPlacementsAfter = await readPlacements();
+  const coveredStoredBefore = coveredPlacementsBefore[noticeNodeId] ?? { dx: 0, dy: 0 };
+  const coveredStoredAfter = coveredPlacementsAfter[noticeNodeId] ?? { dx: 0, dy: 0 };
+  const storedDelta = {
+    x: coveredStoredAfter.dx - coveredStoredBefore.dx,
+    y: coveredStoredAfter.dy - coveredStoredBefore.dy,
+  };
+  const screenDelta = {
+    x: coveredAfter.screen.x - coveredBefore.screen.x,
+    y: coveredAfter.screen.y - coveredBefore.screen.y,
+  };
+  check(
+    'dragging a label under the notice records a manual offset',
+    Math.abs(storedDelta.x - COVERED_DX / coveredBefore.zoom) <= SCENE_TOLERANCE &&
+      Math.abs(storedDelta.y - COVERED_DY / coveredBefore.zoom) <= SCENE_TOLERANCE,
+    `stored=(${storedDelta.x.toFixed(2)},${storedDelta.y.toFixed(2)}) ` +
+      `expected=(${(COVERED_DX / coveredBefore.zoom).toFixed(2)},${(COVERED_DY / coveredBefore.zoom).toFixed(2)})`,
+  );
+  check(
+    'the covered label follows the pointer',
+    Math.abs(screenDelta.x - COVERED_DX) <= SCREEN_TOLERANCE &&
+      Math.abs(screenDelta.y - COVERED_DY) <= SCREEN_TOLERANCE,
+    `moved=(${screenDelta.x.toFixed(2)},${screenDelta.y.toFixed(2)}) expected=(${COVERED_DX},${COVERED_DY})`,
+  );
+  check(
+    'the viewport stays put while the covered label is dragged',
+    Math.abs(coveredAfter.panX - coveredBefore.panX) < 0.5 &&
+      Math.abs(coveredAfter.panY - coveredBefore.panY) < 0.5,
+    `pan ${coveredBefore.panX.toFixed(1)},${coveredBefore.panY.toFixed(1)} -> ` +
+      `${coveredAfter.panX.toFixed(1)},${coveredAfter.panY.toFixed(1)}`,
+  );
+
+  const coveredLoadsAfter = (await readSavedProject(page))?.loads ?? [];
+  check(
+    'dragging under the notice leaves the callout identity and its load untouched',
+    coveredAfter.annotId === noticeNodeId &&
+      JSON.stringify(coveredLoadsAfter) === JSON.stringify(coveredLoadsBefore) &&
+      coveredLoadsAfter.length === 1 &&
+      coveredLoadsAfter[0].nodeId === noticeNodeId &&
+      coveredLoadsAfter[0].value === 40 &&
+      coveredLoadsAfter[0].unit === 'kVA',
+    `${coveredAfter.annotId} / ${JSON.stringify(coveredLoadsAfter)}`,
+  );
+  check(
+    'the notice is still drawn after the drag',
+    (await noticeState()).present === true,
+  );
+
+  /* ---------------- Empty parts of the band behave like the stage ---------------- */
+
+  // With the notice transparent to input, an empty part of the band is ordinary stage
+  // area: a drag there pans. Before the fix it was dead space that also swallowed the
+  // press, which is what made the band feel broken rather than absent.
+  const emptyX = Math.round(under.canvas.x + 25);
+  const emptyY = Math.round(under.rect.y + under.rect.h / 2);
+  const emptyHit = await hitOwnerAt(emptyX, emptyY);
+  check(
+    'an empty part of the band is not owned by an annotation',
+    emptyHit.owner === null,
+    `${emptyHit.tag} in #${emptyHit.group} owner=${emptyHit.owner}`,
+  );
+  const beforeEmptyPan = await measureCallout();
+  await page.mouse.move(emptyX, emptyY);
+  await page.mouse.down();
+  await page.mouse.move(emptyX + 40, emptyY + 25);
+  await page.waitForTimeout(80);
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  const afterEmptyPan = await measureCallout();
+  check(
+    'an empty part of the band still pans the viewport',
+    Math.abs(afterEmptyPan.panX - beforeEmptyPan.panX) > 20 ||
+      Math.abs(afterEmptyPan.panY - beforeEmptyPan.panY) > 15,
+    `pan ${beforeEmptyPan.panX.toFixed(1)},${beforeEmptyPan.panY.toFixed(1)} -> ` +
+      `${afterEmptyPan.panX.toFixed(1)},${afterEmptyPan.panY.toFixed(1)}`,
+  );
+
+  /* ---------------- The manual placement survives a reload ---------------- */
+
+  const noticeBeforeReload = await measureCallout();
+  const noticeOffsetsBeforeReload = await readPlacements();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#preview-canvas svg');
+  await page.waitForTimeout(700);
+  const noticeAfterReload = await measureCallout();
+  check(
+    'the manual placement made under the notice survives a reload',
+    Math.abs(noticeAfterReload.scene.x - noticeBeforeReload.scene.x) < 0.01 &&
+      Math.abs(noticeAfterReload.scene.y - noticeBeforeReload.scene.y) < 0.01 &&
+      JSON.stringify(await readPlacements()) === JSON.stringify(noticeOffsetsBeforeReload),
+    `${JSON.stringify(noticeBeforeReload.scene)} -> ${JSON.stringify(noticeAfterReload.scene)}`,
+  );
+  check(
+    'the notice is drawn again after the reload',
+    (await noticeState()).present === true,
+  );
+
+  /* ---------------- Measuring everything removes the notice ---------------- */
+
+  await page.click('#tab-spans');
+  await page.fill('#field-default-length', '30');
+  await page.click('#btn-apply-default');
+  await page.waitForTimeout(400);
+  const completed = await noticeState();
+  check(
+    'the notice disappears once every span is measured',
+    completed.present === false,
+    JSON.stringify(completed.present),
+  );
+  // Removing the notice must not disturb where the user put the label.
+  check(
+    'removing the notice leaves the manual offset unchanged',
+    JSON.stringify(await readPlacements()) === JSON.stringify(noticeOffsetsBeforeReload),
+    JSON.stringify(await readPlacements()),
+  );
 
   section('Spreadsheet and CSV workflow');
 

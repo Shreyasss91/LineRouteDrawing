@@ -413,9 +413,19 @@ they are transparent and exist only to catch clicks.
   move a label that the user placed. This is verified at three zoom levels in browser
   `§Manual annotation placement`, and the arithmetic is finding
   [F3](findings.md#f3-drag-at-zoom-is-verified-against-the-stored-scene-offset).
-- The notice overlay described in §8 is drawn above the callouts and, in the preview, is
-  hit-testable, so a label underneath it cannot be grabbed until the notice is gone
-  ([F12](findings.md#f12-the-in-drawing-notice-overlay-intercepts-pointer-events-over-the-annotations-beneath-it)).
+- The notice overlay described in §8 is drawn above the callouts, and it stays above
+  them, so it still paints over any label that reaches the same band. It is however
+  **presentational only**: the group carries `pointer-events="none"`, so a press on it
+  passes straight through to whatever is underneath — an annotation keeps its drag, and
+  an empty part of the band behaves like the bare stage. Visible but not interactive is
+  the whole contract; before it, a label under the band could not be dragged at all and
+  the gesture panned the drawing instead
+  ([F12](findings.md#f12-the-in-drawing-notice-overlay-intercepted-pointer-events-over-the-annotations-beneath-it))
+- A press is never captured by an informational overlay, and the notice is the only such
+  overlay in the preview. The separate `#hit-areas` layer *is* interactive on purpose —
+  it is what makes a pole or a span clickable — so pressing a pole topmost selects it, and
+  a label dragged directly on top of one pans instead of moving, exactly as pressing the
+  bare pole does.
 - Both are emitted as `<g id="callout:…">` / span-label groups in SVG and as a line +
   polygon + text run in PDF, from the same scene record.
 - The annotation layout is computed in an unpadded frame and shifted by the scene

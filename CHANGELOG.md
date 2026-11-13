@@ -17,6 +17,34 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Fixed
 
+- **The completeness notice swallowed presses meant for the labels under it (finding
+  F12).** While a survey is incomplete the renderer appends an `#notice` group after
+  `#load-callouts` and `#span-lengths`, carrying a filled white rectangle. Painting last is
+  deliberate — the message needs a clear band — but the rectangle also kept default
+  `pointer-events`, so it took the hit. A press on a label that happened to sit under the
+  band was a press on the notice: the canvas `pointerdown` found no `[data-annot-id]`
+  ancestor, no drag started, and the event reached the stage listener, which panned the
+  viewport. The label could not be moved at all, and the gesture moved the whole drawing.
+
+  Reproduced through the real UI: route `origin → south, 2 spans` left unmeasured, a
+  40 kVA load on its destination, then the callout dragged into the band with a real drag.
+
+  ```
+  before: elementFromPoint(callout centre) -> rect in #notice, owner null
+          drag -> pan 229.9,13.8 -> 189.9,-4.2, offset unchanged
+
+  after:  elementFromPoint(callout centre) -> text in #callout:dst:route-10, owner dst:route-10
+          drag -> stored (-16.17,-7.74) = pointer (-46,-22) / zoom 2.845, pan unchanged
+  ```
+
+  The group is now `<g id="notice" pointer-events="none">` (`src/render/svg.js`). Nothing
+  about the notice is a control, so it has no business taking pointer input: the press
+  reaches whatever is genuinely underneath — an annotation keeps its drag, and an empty
+  part of the band behaves like the bare stage. Geometry, text, colours, opacity and paint
+  order are untouched, so it looks identical and is still visible in the preview. It was
+  never exported (`showCompleteNotice` is `false` in all three export profiles), so no PDF
+  or SVG output changes.
+
 - **A load naming its point by an accepted alias was treated as an orphan and never
   drawn.** The project parser accepted the file - `canonicalNodeId('0,-2')` resolves to
   `dst:route-1` - but kept the spelling verbatim, while `src/ui/network_panel.js`
@@ -82,6 +110,21 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Added
 
+- Browser §9 "The incomplete-measurement notice does not block labels" (17 checks), suite
+  298 → 317. It parks a real callout under the notice band with a real drag, then proves
+  the band no longer takes the press: the notice is drawn and has `pointer-events: none`;
+  the label really does lie inside the band and the element under its centre belongs to
+  the callout; a drag there stores `pointer ÷ zoom`, the label follows the pointer and the
+  viewport does not move; the callout id and the load's id/target/value/unit are unchanged;
+  the placement survives a reload and the notice is redrawn; an empty part of the band
+  still pans; and measuring every span removes the notice without disturbing the offset.
+- Two **test-strength** corrections in the existing drag section (finding F3, unchanged
+  production code). The saved `loadPlacements` are now snapshotted immediately before and
+  after the stage pan and asserted byte-identical, so "panning moves the view and not the
+  label" is proved rather than inferred from the viewport numbers. The "a click is not a
+  drag" check now aims through the same `findGrabPoint()` search the drags use and asserts
+  the element at that point belongs to the expected annotation, so a click that landed on
+  something else entirely can no longer pass.
 - `test/project.test.js` 22 → 29 tests (23-29) covering the canonicalisation boundary:
   alias normalised to the canonical id; already-canonical preserved; an unresolved
   identifier kept verbatim with its warning; the caller's JSON unmutated; the canonical id
@@ -108,6 +151,19 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Verification
 
+- **The notice fix is proved by mutation.** Restoring `<g id="notice">` without the
+  attribute fails **5** of the 17 new checks, including `the notice no longer takes the
+  hit`, `the covered label is still grabbable`, `dragging a label under the notice records
+  a manual offset` and `the covered label follows the pointer`; `src/render/svg.js` was
+  restored byte-for-byte afterwards (`cmp` clean) and the suite re-run green.
+- Full runs in this state: `npm test` **485/485 Node tests in 30 files**;
+  `npm run test:browser` **317/317 checks in 15 sections**; documentation links 318 in 15
+  files with 0 problems; code fences balanced.
+- Deliberate behaviour recorded rather than changed: the preview also draws `#hit-areas`
+  last with `pointer-events: all`, because pressing a pole selects it. A label dragged on
+  top of a pole's hit circle therefore pans instead of moving — a hit target doing its job,
+  and recoverable because the plate is wider than the circle. It is documented alongside
+  F12 so it is not later mistaken for a regression of this fix.
 - **Drag-at-zoom now has executable coverage (finding F3 closed). No production change.**
   A callout is drawn at a scene coordinate and shown through the CSS
   `translate() scale(view.zoom)` that `applyView()` writes; the SVG's `width`/`height`

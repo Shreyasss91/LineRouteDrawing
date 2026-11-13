@@ -437,10 +437,15 @@ selected mode.
   twice as far as the cursor did. The stored figure is always **scene units, never screen
   pixels**, which is why zooming in or out later, or panning the drawing, cannot move a
   label you placed. Verified at three zoom levels in browser `§8`.
-- One caveat: while some spans or loads are still unmeasured, the in-drawing "incomplete"
-  notice is drawn above the labels and catches the pointer, so a label sitting under it
-  will pan the drawing instead of moving. Measure the spans first and the notice goes away
-  ([F12](findings.md#f12-the-in-drawing-notice-overlay-intercepts-pointer-events-over-the-annotations-beneath-it)).
+- While some spans or loads are still unmeasured, an "incomplete" notice is drawn across
+  the bottom of the preview, above the labels. It is informational only: presses pass
+  through it, so a label underneath can still be dragged normally, and the empty parts of
+  the band pan the drawing like any other empty area. You do **not** have to measure the
+  spans before moving a label
+  ([F12](findings.md#f12-the-in-drawing-notice-overlay-intercepted-pointer-events-over-the-annotations-beneath-it)).
+- One thing that is deliberate: clicking a pole selects it, so a label dragged directly on
+  top of a pole's click area will pan instead of moving. The label plate is wider than that
+  click area, so grab its edge, or drag it off the pole.
 - Because it is an offset from the automatic placement, the annotation **follows its
   pole** when the drawing is re-laid-out, survives a reload, and is saved into the
   project file.

@@ -246,8 +246,17 @@ export function renderSceneToSvg(scene, options = {}) {
     // presenting a partial survey as a finished one.
     if (annots.notice) {
       const n = annots.notice;
+      // `pointer-events="none"` because this is an informational overlay, not a
+      // control. It is drawn after the callouts so it can claim a clear band, which
+      // also put it above them in the hit-test order: a press on a label that happened
+      // to sit under the band was a press on the notice, so the drag never started and
+      // the event fell through to the stage, panning the drawing instead. Nothing about
+      // the notice is interactive, so it has no business taking pointer input at all -
+      // with this attribute the press reaches whatever is really underneath, whether
+      // that is an annotation or the stage. (Finding F12.)
       parts.push(
-        `<g id="notice" font-family="${escapeXml(scene.fontFamily)}" font-size="${num(n.fontSize)}">`,
+        `<g id="notice" pointer-events="none" ` +
+          `font-family="${escapeXml(scene.fontFamily)}" font-size="${num(n.fontSize)}">`,
       );
       parts.push(
         `<rect x="${num(n.boxes.x1)}" y="${num(n.boxes.y1)}" ` +

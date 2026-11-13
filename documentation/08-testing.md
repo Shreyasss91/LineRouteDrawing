@@ -5,7 +5,7 @@
 1. [Requirements](#1-requirements)
 2. [Commands](#2-commands)
 3. [The Node suite: 485 tests in 30 files](#3-the-node-suite-485-tests-in-30-files)
-4. [The browser suite: 298 checks in 14 sections](#4-the-browser-suite-298-checks-in-14-sections)
+4. [The browser suite: 317 checks in 15 sections](#4-the-browser-suite-317-checks-in-15-sections)
 5. [The headed print smoke test](#5-the-headed-print-smoke-test)
 6. [Test strategy: what is tested and why](#6-test-strategy-what-is-tested-and-why)
 7. [Writing a new test](#7-writing-a-new-test)
@@ -32,7 +32,7 @@
 | Command | What it does | Expected result |
 | --- | --- | --- |
 | `npm test` | `node --test "test/*.test.js"` | **485 tests, 485 pass, 0 fail** |
-| `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **298/298 checks pass** |
+| `npm run test:browser` | `node scripts/test-browser.mjs` — starts `scripts/serve.js`, drives Chromium, asserts, exits | **317/317 checks pass** |
 | `npm run test:print:headed` | `node scripts/print-dialog-smoke.mjs` — opens a real print dialog | manual, needs an interactive terminal |
 | `npm run serve` | static server for manual use | serve locally, then open the printed URL |
 
@@ -90,7 +90,7 @@ Run one file:
 node --test test/geometry.test.js
 ```
 
-## 4. The browser suite: 298 checks in 14 sections
+## 4. The browser suite: 317 checks in 15 sections
 
 `npm run test:browser` starts a static server and drives Chromium against the real
 `index.html`. It asserts on the **rendered DOM and SVG**, not on internals.
@@ -104,13 +104,14 @@ node --test test/geometry.test.js
 | 5 | Editing an existing route | Opening the edit form switches it to save mode; a direction change saves with the route's **id preserved** in both the table and the saved file; the load on the edited route's **destination** keeps its derived id (`dst:<routeId>`) even though the point moves, stays resolved, and its callout is redrawn on the moved point; both unrelated route records are byte-identical in the saved project; designations are carried; the direction, load target, value and unit survive a reload |
 | 6 | Changing a destination to a TC point | Ticking TC on an edit whose destination carries a load is **refused** with a message naming the load. Includes a **shared junction**: two routes ending at the same coordinate, where only the earlier route's id is a registered asset, so the destination is resolved by its end coordinate — the load is still found and the edit refused, while a load-free shared destination can still become a TC point; the route, the load, its id/value/unit and the edit-in-progress are all preserved; the saved project is still **openable by the parser** and reloads with no recovery banner; a destination with no load can still be made TC, and after removing the load the same transition succeeds |
 | 7 | Changing a destination to a TC point (aliased load) | A load stored under a **coordinate alias** (`0,-2`) instead of the canonical id: the alias is proven to resolve to the destination through the registry, the parser **canonicalises** it at the validation boundary, no orphan warning is raised, the schedule panel shows `dst:route-1 pole` unmarked, the callout `callout:dst:route-1` is drawn with `25 kVA`, the edit is refused, the route stays a pole, the canonical id is what a save writes and it survives a reload |
-| 8 | Manual annotation placement | Drags a real callout with real pointer events at **three different zooms** - fit, zoomed in twice, zoomed out three times - and for each one checks the whole contract: the stored scene delta equals `pointer delta ÷ zoom`, the plate's SVG `x`/`y` moves by the same amount, and the label moves on screen by exactly the pointer delta. The two non-fit drags apply conversion factors whose ratio equals the ratio of their zooms (measured 3.052 against 3.052), so a raw-pixel implementation cannot pass. Also: zooming and panning leave the stored offset untouched; a genuine reload keeps the scene position and the offset while re-fitting the zoom; re-zooming after that reload still does not move it; dragging changes no route, load, node or span-length data; a click is not recorded as a drag; an annotation with no offset is still placed automatically; and a callout that carries a manual offset keeps it when a second load appears |
-| 9 | Spreadsheet and CSV workflow | TSV copy has the designation header; a valid import is staged before applying; cancel applies nothing; an invalid import is refused whole and changes nothing |
-| 10 | Export visibility | Both switches start on; each combination changes the exports; the preview is unaffected |
-| 11 | PDF output | The PDF is produced, is a real PDF, and contains the expected vector work |
-| 12 | Print output, every page layout | For all four layouts: the SVG is sized **explicitly in mm**, fits the printable box, keeps the scene aspect, and the `@page` size is the chosen paper — i.e. **one sheet** |
-| 13 | TC marker geometry | The printed leaving span equals the configured spacing; no line inside the triangle; the triangle's outline matches across profiles |
-| 14 | Console | No console errors or unhandled rejections during the whole run |
+| 8 | Manual annotation placement | Drags a real callout with real pointer events at **three different zooms** - fit, zoomed in twice, zoomed out three times - and for each one checks the whole contract: the stored scene delta equals `pointer delta ÷ zoom`, the plate's SVG `x`/`y` moves by the same amount, and the label moves on screen by exactly the pointer delta. The two non-fit drags apply conversion factors whose ratio equals the ratio of their zooms (measured 3.052 against 3.052), so a raw-pixel implementation cannot pass. Also: zooming and panning leave the stored offset untouched; a genuine reload keeps the scene position and the offset while re-fitting the zoom; re-zooming after that reload still does not move it; dragging changes no route, load, node or span-length data; a click is not recorded as a drag; an annotation with no offset is still placed automatically; and a callout that carries a manual offset keeps it when a second load appears. Two of these are guards against passing for the wrong reason: the saved `loadPlacements` are snapshotted immediately **before and after** the stage pan and must be byte-identical, and the "a click is not a drag" check aims through the same `findGrabPoint` search the drags use and asserts the element at that point belongs to the expected annotation, so a click that landed on something else could not pass |
+| 9 | The incomplete-measurement notice does not block labels | Parks a real callout under the notice band with a real drag, then proves the notice no longer takes the press. Covers: the notice is drawn and has `pointer-events: none`; the label really does lie inside the band and the element under its centre belongs to the callout; a drag there stores `pointer ÷ zoom`, the label follows the pointer and the viewport does not move; callout id and load id/target/value/unit are unchanged; the placement survives a reload and the notice is redrawn; an empty part of the band still pans the viewport; and measuring every span removes the notice without disturbing the offset ([F12](findings.md#f12-the-in-drawing-notice-overlay-intercepted-pointer-events-over-the-annotations-beneath-it)) |
+| 10 | Spreadsheet and CSV workflow | TSV copy has the designation header; a valid import is staged before applying; cancel applies nothing; an invalid import is refused whole and changes nothing |
+| 11 | Export visibility | Both switches start on; each combination changes the exports; the preview is unaffected |
+| 12 | PDF output | The PDF is produced, is a real PDF, and contains the expected vector work |
+| 13 | Print output, every page layout | For all four layouts: the SVG is sized **explicitly in mm**, fits the printable box, keeps the scene aspect, and the `@page` size is the chosen paper — i.e. **one sheet** |
+| 14 | TC marker geometry | The printed leaving span equals the configured spacing; no line inside the triangle; the triangle's outline matches across profiles |
+| 15 | Console | No console errors or unhandled rejections during the whole run |
 
 The route-edit section is the automated guard for the edit path that was previously
 untested in the DOM ([findings F2](findings.md#f2-an-edited-route-is-now-covered-by-a-browser-test)).

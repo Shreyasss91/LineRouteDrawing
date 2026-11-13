@@ -19,7 +19,7 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | Open |
 | [F10](#f10-a-load-cannot-reach-a-tc-point-by-creation-move-edit-import-or-file) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — five guarded boundaries covering creation, move, route edit, import and file; fail-closed, each with executable evidence |
 | [F11](#f11-an-aliased-load-id-is-not-resolved-by-the-schedule-and-annotation-layers) | Alias identity handled inconsistently | Low | **Closed** — aliases canonicalised once at the validation boundary |
-| [F12](#f12-the-in-drawing-notice-overlay-intercepts-pointer-events-over-the-annotations-beneath-it) | Interaction | Low–Medium | Open — recorded while testing F3, not changed |
+| [F12](#f12-the-in-drawing-notice-overlay-intercepted-pointer-events-over-the-annotations-beneath-it) | Interaction | Low–Medium | **Closed** — the notice is now `pointer-events="none"`; 17 browser checks |
 
 ---
 
@@ -484,11 +484,13 @@ entry point gives them nothing to disagree about.
 
 ---
 
-## F12 — The in-drawing notice overlay intercepts pointer events over the annotations beneath it
+## F12 — The in-drawing notice overlay intercepted pointer events over the annotations beneath it
 
-**Status: open. Recorded, not changed.** Discovered while adding the F3 zoom coverage; it
-is unrelated to the zoom conversion, so it was left alone rather than folded into an act
-about coordinate arithmetic.
+**Status: closed.** The notice is now non-interactive (`pointer-events="none"`), and
+browser `§The incomplete-measurement notice does not block labels` drives the whole
+situation: it parks a real callout under the notice with a real drag, then proves the
+press reaches the label again, the stored offset changes, the label follows the pointer
+and the viewport does not move.
 
 **Observed.** When a drawing has unmeasured spans or loads, the renderer adds an
 `#notice` group (`src/render/svg.js`) carrying a filled white rectangle
@@ -520,12 +522,43 @@ all. It is also confined to the on-screen preview: `showCompleteNotice` is true 
 the preview profile, so the notice is not drawn into an exported PDF or SVG (see
 [F6](#f6-the-completeness-notice-is-preview-only)) and this cannot affect a printed sheet.
 
-**Suggested direction, if it is taken up.** Mark the notice non-interactive —
-`pointer-events="none"` on the `#notice` group — so it stays visible and exported but
-stops absorbing input, and add a browser check that presses a point known to be under the
-notice and asserts that the drag either starts or that the viewport does not move. Worth
-confirming at the same time that the notice is not the only overlay relying on default
-pointer behaviour.
+**Fix.** `pointer-events="none"` on the `#notice` group in `src/render/svg.js`. Nothing
+about the notice is a control, so it has no business taking pointer input: the press now
+reaches whatever is genuinely underneath, whether that is an annotation or the stage. The
+group's geometry, text, colours, opacity and paint order are untouched, so it looks and
+exports exactly as before and is still visible in the preview.
 
-**Workaround, documented rather than coded.** Measure the spans first; the notice then
-disappears and every callout is draggable.
+**Why it is safe to be unconditional.** The attribute is on the group in the shared SVG
+renderer, but `showCompleteNotice` is `false` in every export profile, so the group only
+ever exists in the preview. No PDF or SVG export changes.
+
+**Evidence.** Before the change, at five points across the visible band,
+`elementFromPoint` returned `rect` in `#notice` with no annotation owner; after it, the
+same five points return `text` in `#callout:dst:route-10`. The regression section covers
+17 checks:
+
+| Check | What it proves |
+| --- | --- |
+| the notice is drawn / `pointer-events` is `none` | it is visible to the reader and invisible to the pointer |
+| the label is parked under the band, and the hit owner is the callout | the premise is real, not assumed |
+| the stored offset moves by `pointer ÷ zoom` | the drag ran, and ran through the same conversion as F3 |
+| the label follows the pointer, the viewport does not move | the press no longer falls through to the stage |
+| callout id, load id/target/value/unit unchanged | moving a label is not an edit |
+| the placement survives a reload; the notice is redrawn | nothing depends on the notice being present |
+| an empty part of the band still pans | the band is pass-through, not dead space |
+| the notice disappears once every span is measured | and the manual offset is unchanged by its removal |
+
+Mutation: restoring `<g id="notice">` without the attribute fails 5 of those checks,
+including `the notice no longer takes the hit` and `dragging a label under the notice
+records a manual offset`.
+
+**A related behaviour that is deliberate, not a defect.** The preview also draws
+`#hit-areas` last, with `pointer-events: all`, because pressing a pole selects it. A label
+dragged on top of a pole's hit circle therefore pans rather than moves, exactly as a press
+on the bare pole does. That is a hit target doing its job — a click selects, a drag pans —
+and unlike the notice it is recoverable: the plate is wider than the circle, so its edges
+remain grabbable, and the label can be dragged off again. It is recorded here so the next
+reader does not mistake it for a regression of this fix.
+
+**Workaround no longer needed.** The previous advice — measure the spans first — is
+withdrawn; the notice no longer blocks anything.

@@ -45,7 +45,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Feature | Status | Evidence | Limits |
 | --- | --- | --- | --- |
 | Pole drawn as an X | Verified | `render.test.js` | — |
-| TC drawn as a triangle | Verified | `tc_anchor.test.js`, `fpb.test.js`, `browser` §11 | — |
+| TC drawn as a triangle | Verified | `tc_anchor.test.js`, `fpb.test.js`, `browser` §14 | — |
 | FPB drawn as a box with `FPB` inside | Verified | `fpb.test.js`, `browser` | — |
 | A marker replaces the X | Verified | `fpb.test.js`, `browser` | — |
 | TC anchored on its downstream base midpoint | Verified | `tc_anchor.test.js` (12 tests) | — |
@@ -105,6 +105,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Drag stored as an offset, follows its pole | Verified | `browser` §8 "the callout keeps its scene position across a reload" | Offset is a scene-space delta, so a re-layout carries the label with its pole |
 | Drag scaled by zoom | Verified | `browser` §8, three zooms: stored and drawn scene delta both equal `pointer ÷ zoom`, on-screen movement equals the pointer delta, and the two conversion factors differ by the ratio of the zooms (3.052 vs 3.052) | **Closed F3.** No production change was needed - the arithmetic was already correct; it was the coverage that was missing |
 | A click of no travel is not recorded | Verified | `browser` §8 "a click on a callout is not recorded as a drag" | A drag under half a pixel is discarded |
+| A label under the completeness notice can still be dragged | Verified | `browser` §9 "dragging a label under the notice records a manual offset"; a mutation that restores the old markup fails 5 checks | **Closed F12.** The `#notice` group carries `pointer-events="none"`, so the band is visible but pass-through: a label under it keeps its drag and an empty part of it pans the viewport. Geometry, text, colours and paint order are unchanged, and the notice is still preview-only |
 | Annotations identical in preview and export | Verified | `annotation_layer.js` `labelSlots` + browser PDF/print sections | Same unpadded frame |
 
 ## 6. Persistence
@@ -131,11 +132,11 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | CSV export, node loads | Verified | `schedule_io.test.js` (31 tests) | Includes load-less nodes as blank rows |
 | CSV export, span lengths | Verified | `schedule_io.test.js` | One row per physical span |
-| TSV copy to the clipboard | Verified | `browser` §7; `schedule_io.test.js` | Falls back to `execCommand` on `file://` |
+| TSV copy to the clipboard | Verified | `browser` §10; `schedule_io.test.js` | Falls back to `execCommand` on `file://` |
 | CSV/paste import with delimiter detection | Verified | `schedule_io.test.js` | Comma or tab |
-| Staged import with a plan | Verified | `browser` §7, `schedule_io.test.js` | Nothing applied until Apply |
-| Replace vs update-matching-ids modes | Verified | `schedule_io.test.js`, `browser` §7 | — |
-| A bad line refuses the whole file | Verified | `browser` §7, `schedule_io.test.js` | 7 `IMPORT_ERRORS` codes |
+| Staged import with a plan | Verified | `browser` §10, `schedule_io.test.js` | Nothing applied until Apply |
+| Replace vs update-matching-ids modes | Verified | `schedule_io.test.js`, `browser` §10 | — |
+| A bad line refuses the whole file | Verified | `browser` §10, `schedule_io.test.js` | 7 `IMPORT_ERRORS` codes |
 | Unresolved rows reported, file still accepted | Verified | `schedule_io.test.js` | By design |
 | Excel/`.xlsx` direct import | **Unsupported** | — | CSV/TSV only |
 | Other CAD or GIS formats | **Unsupported** | — | — |
@@ -146,15 +147,15 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | One shared scene for all outputs | Verified | `render.test.js`, `pdf_geometry.test.js` | — |
 | SVG export, editable primitives | Verified | `render.test.js`, `browser` §11 | — |
-| PDF export, vector only | Verified | `pdf_geometry.test.js` (11), `pdf_layouts.test.js` (12), `browser` §9 | jsPDF 4.2.1 vendored |
+| PDF export, vector only | Verified | `pdf_geometry.test.js` (11), `pdf_layouts.test.js` (12), `browser` §12 | jsPDF 4.2.1 vendored |
 | PDF page transform (one scale, centred) | Verified | `pdf_geometry.test.js` | — |
 | Four page layouts | Verified | `page_format.test.js` (9), `pdf_layouts.test.js` | See `10-limitations.md` §5 |
 | One page, every layout (automated) | Verified | `browser` "the drawing fits the printable height, so one sheet is enough" per layout, `print_fit.test.js` | The `c39eca9` fix |
-| Print paper matches the chosen layout | Verified | `browser` §10 (`@page size`) | — |
+| Print paper matches the chosen layout | Verified | `browser` §13 (`@page size`) | — |
 | Letter landscape in the real Chrome print dialog | **Verified (manual)** | Manual run recorded for `c39eca9` | — |
 | A4 portrait / A3 landscape in a real print dialog | **Incomplete validation** | Automated only | No manual run recorded |
 | Physical printer output | **Verified (manual, external)** | Carried out by the user | Not reproducible in this repo |
-| Export switches (loads, lengths) | Verified | `export_visibility.test.js` (11), `browser` §8 | Presentation only |
+| Export switches (loads, lengths) | Verified | `export_visibility.test.js` (11), `browser` §11 | Presentation only |
 | Exports hide `Origin` and letters | Verified | `export_visibility.test.js` | — |
 | Completeness notice never exported | Verified | `export_visibility.test.js` | — |
 | Export blocked on invalid routes or tight spacing | Verified | `browser`, `clearance.test.js` | — |
@@ -187,7 +188,7 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | --- | --- | --- | --- |
 | Runs fully offline from the local filesystem | Verified | No network requests in the source; jsPDF vendored | `file://` disables the clipboard fallback path |
 | Works from `npm run serve` | Verified | `scripts/serve.js`, used by `test-browser.mjs` | — |
-| Chromium (via Playwright) | Verified | 298 browser checks | — |
+| Chromium (via Playwright) | Verified | 317 browser checks | — |
 | Chrome, manually | Verified (manual) | Print-dialog validation | — |
 | Firefox | **Incomplete validation** | Nothing browser-specific in the source | Never run |
 | Safari / iOS | **Incomplete validation** | Nothing browser-specific | Never run |
