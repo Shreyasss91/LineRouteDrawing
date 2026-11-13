@@ -22,7 +22,7 @@ The full documentation set lives in [`documentation/`](documentation/README.md):
 | [Persistence and project format](documentation/05-persistence.md) | The exact JSON field reference, migrations, refusal codes, recovery |
 | [Identity and network data](documentation/06-identity-and-data.md) | Asset ids, designations, loads, span lengths, reconciliation |
 | [Rendering and export](documentation/07-rendering-and-export.md) | Profiles, the four page layouts, fit-to-sheet, the `c39eca9` regression |
-| [Testing and development](documentation/08-testing.md) | Commands, the 516 Node tests and 340 browser checks, conventions |
+| [Testing and development](documentation/08-testing.md) | Commands, the 526 Node tests and 340 browser checks, conventions |
 | [Feature and validation matrix](documentation/09-feature-matrix.md) | Every capability with its verification status |
 | [Known limitations](documentation/10-limitations.md) | What it cannot do, and what has not been validated |
 | [Findings](documentation/findings.md) | Defects and gaps recorded but deliberately not fixed |
@@ -311,7 +311,7 @@ calculates a coordinate, a pole or a junction of its own.
 npm test
 ```
 
-Uses Node's built-in test runner; no dependencies to install. **516 tests across 32
+Uses Node's built-in test runner; no dependencies to install. **526 tests across 33
 files** cover cardinal directions, span and pole counts, alphabetical labelling, TC
 identification and naming, endpoint reuse, shared-node merging, partial and complete
 overlap, intersections, multiple branches, label visibility per profile, TC retention
@@ -353,6 +353,23 @@ It needs two things that the application itself does not:
 The harness starts its own static server on a free port, clears browser storage
 before each scenario, and exits non-zero if any check fails. It is a development
 aid; the application itself never depends on Playwright.
+
+### Performance baseline
+
+```sh
+npm run benchmark            # the DOM-free phases, four fixed drawings
+npm run benchmark -- --scaling   # annotation placement vs drawing size
+npm run benchmark:browser    # the real page in Chrome: cold start and recompute
+```
+
+Measured, not asserted: no threshold, no gate, and nothing in the test suite reads
+these numbers. On the machine in
+[the baseline](documentation/11-performance-baseline.md#2-the-environment-measured)
+the bundled 34-span example opens in ~0.1 s and costs ~7 ms to edit, while a
+fully-surveyed 501-span drawing opens in ~0.5 s and costs ~225 ms per edit. The
+measurements also established that annotation placement is quadratic in the number of
+labels — recorded as [F13](documentation/findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels),
+measured and deliberately not fixed in the act that found it.
 
 ### Print dialog smoke test
 

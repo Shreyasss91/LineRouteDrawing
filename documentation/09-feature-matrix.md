@@ -199,7 +199,24 @@ Test evidence is given as `file` or `file: "test name"` so it can be re-run.
 | Mobile layouts | **Unsupported** | — | The UI assumes a desktop-sized viewport |
 | Node.js 20+ for the test suite | Verified | `npm test` on this tree | `engines` declares `>=20` |
 
-## 11. Summary of what is *not* proven
+## 11. Performance
+
+Measured, not asserted as a target. The full tables, method and caveats are in
+[11-performance-baseline.md](11-performance-baseline.md); this table records only what is
+now known and how it was obtained.
+
+| Feature | Status | Evidence | Limits |
+| --- | --- | --- | --- |
+| Reproducible baseline for four fixed drawings | Verified | `npm run benchmark` (Node), `npm run benchmark:browser` (Chrome) | One machine, one run; no threshold and no gate |
+| Dataset sizes the numbers refer to | Verified | `benchmark_datasets.test.js` (10 tests) | Counts only; timings vary by machine |
+| Bundled example (34 spans) opens and edits without perceptible delay | Verified | baseline: 0.6 ms end to end, 6.8 ms recompute | Measured headless |
+| 500-span drawing opens in under half a second | Verified | baseline: 0.23 s unmeasured, 0.47 s fully surveyed (cold start to drawing) | This machine; not a promise |
+| Editing a 500-span drawing | Verified | baseline: 92 ms recompute unmeasured, 225 ms fully surveyed | Noticeable on every edit at the surveyed size |
+| Annotation placement scales linearly | **Unsupported** | `npm run benchmark -- --scaling`: ×3.4 per doubling at 400 spans | Quadratic; recorded as [F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels) |
+| PDF, print and long-session behaviour are timed | **Unsupported** | — | Deliberately excluded; reasons in baseline §10 |
+| A performance regression fails the suite | **Unsupported** | — | Machine-specific numbers are not a gate |
+
+## 12. Summary of what is *not* proven
 
 Collected from the tables above — these are the honest gaps:
 
@@ -208,6 +225,12 @@ Collected from the tables above — these are the honest gaps:
 2. **Firefox and Safari have never been run.**
 3. **No touch device, no mobile layout, no keyboard-only run.**
 4. **No screen-reader path to the drawing.**
-5. **No performance baseline** for large drawings (hundreds of routes).
-6. **Physical printing was validated outside this repository** by the user, and is not
+5. **Physical printing was validated outside this repository** by the user, and is not
    reproducible here.
+6. **No performance figure has been taken on a machine other than the one in
+   [baseline §2](11-performance-baseline.md#2-the-environment-measured)**, and no
+   regression gate exists — the baseline is a measurement, not a threshold.
+
+Performance is no longer on this list as an *unquantified* gap: it is measured, and the
+one genuinely slow path (annotation placement) is recorded as
+[F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels).

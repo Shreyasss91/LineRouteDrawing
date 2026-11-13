@@ -140,7 +140,7 @@ had open (see [Persistence and project format](05-persistence.md)).
 ## Running the tests
 
 ```sh
-npm test                    # 516 Node tests, no dependencies required
+npm test                    # 526 Node tests, no dependencies required
 npm run test:browser        # 340 browser checks; needs Playwright + Chrome
 npm run test:print:headed   # manual print-dialog check; needs a real terminal
 ```
@@ -196,6 +196,7 @@ Confirmed limitations, and why each exists, are in
 | [08-testing.md](08-testing.md) | Commands, test architecture, fixtures, browser suite, headed print smoke. |
 | [09-feature-matrix.md](09-feature-matrix.md) | Consolidated capability / status / evidence matrix. |
 | [10-limitations.md](10-limitations.md) | Confirmed limitations and extension boundaries. |
+| [11-performance-baseline.md](11-performance-baseline.md) | What a drawing costs on four fixed datasets, how it was measured, and how to re-measure it. |
 | [findings.md](findings.md) | Discrepancies found during documentation, recorded as observations. |
 
 ## Glossary

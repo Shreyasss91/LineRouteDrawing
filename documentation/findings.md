@@ -4,6 +4,10 @@ Observations made while documenting this codebase. Most were recorded for a sepa
 decision rather than fixed; **F10 has since been implemented and closed**, and is kept
 here in its closed form so the history of the defect stays visible.
 
+Closed entries keep their original observation and gain what closed them, so the record of
+the defect survives its fix. Open entries say what is known and what a fix would have to
+satisfy.
+
 Severity is about what a user or maintainer would experience, not about code style.
 
 | ID | Area | Severity | Status |
@@ -16,10 +20,11 @@ Severity is about what a user or maintainer would experience, not about code sty
 | [F6](#f6-the-completeness-notice-is-preview-only) | Export completeness | Low | Open — arguably by design |
 | [F7](#f7-route-entry-has-no-undo-and-no-row-reordering) | Data safety | Medium | Open — by design |
 | [F8](#f8-appjs-is-a-1590-line-controller) | Maintainability | Low | Open |
-| [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | Open |
+| [F9](#f9-no-performance-baseline-for-large-drawings) | Unverified scale | Medium | **Closed** — four fixed datasets measured in Node and in Chrome |
 | [F10](#f10-a-load-cannot-reach-a-tc-point-by-creation-move-edit-import-or-file) | Eligibility not enforced at the boundary | Low–Medium | **Closed** — five guarded boundaries covering creation, move, route edit, import and file; fail-closed, each with executable evidence |
 | [F11](#f11-an-aliased-load-id-is-not-resolved-by-the-schedule-and-annotation-layers) | Alias identity handled inconsistently | Low | **Closed** — aliases canonicalised once at the validation boundary |
 | [F12](#f12-the-in-drawing-notice-overlay-intercepted-pointer-events-over-the-annotations-beneath-it) | Interaction | Low–Medium | **Closed** — the notice is now `pointer-events="none"`; 17 browser checks |
+| [F13](#f13-annotation-placement-is-quadratic-in-the-number-of-labels) | Scale | Medium | Open — measured, not fixed |
 
 ---
 
@@ -354,16 +359,78 @@ precedent of `clearance.js`, `print.js`, `schedule_io.js` and `project.js`.
 
 ## F9 — No performance baseline for large drawings
 
-**Observed.** A synthetic 40-route chain (501 spans) takes roughly 2 ms to build the
-network and 9 ms to build the scene under Node, but the browser path — including
-annotation placement, hit-area generation and two SVG renders — has **no measurement**
-and no test beyond the bundled example's 34 nodes.
+**Status: closed.** There is now a reproducible baseline on four fixed drawings, in both
+Node and a real browser, and the numbers are in
+[11-performance-baseline.md](11-performance-baseline.md#1-how-to-reproduce). Measuring it
+turned the guess below into a fact: annotation placement *is* the superlinear cost, and it
+is now recorded as [F13](#f13-annotation-placement-is-quadratic-in-the-number-of-labels).
+Nothing was optimised in this act — the brief was measurement, and the baseline is what
+makes a later optimisation checkable.
 
-**Impact.** Medium and unquantified. `annotations.js` searches candidate positions
-against obstacles, which is the most likely superlinear cost.
+**Observed originally.** A synthetic 40-route chain (501 spans) took roughly 2 ms to build
+the network and 9 ms to build the scene under Node, but the browser path — including
+annotation placement, hit-area generation and two SVG renders — had **no measurement** and
+no test beyond the bundled example's 34 nodes.
 
-**Suggested fix.** Add a scripted large-drawing timing check before claiming any scale
-limit.
+**What the baseline now says.** On the 501-span chain the scene builds in 13.5 ms, of which
+13.6 ms is annotation placement (i.e. all of it), and one real edit — the application's own
+`refresh()` — costs 92 ms of main-thread time; the fully surveyed version of the same
+drawing costs 225 ms per edit. The bundled 34-span example is 0.6 ms end to end and 6.8 ms
+per edit. So the drawing the tool ships with is free, a few hundred spans is comfortable,
+and 500 fully-surveyed spans is the point where editing starts to feel slow. The
+interactive limit (`MAX_ROUTE_SPANS`, 500 per route) is unchanged: it was never derived from
+these numbers, and this act does not move it.
+
+**What is pinned by a test.** The dataset sizes, not the timings — a duration depends on the
+machine, so `test/benchmark_datasets.test.js` (10 tests) asserts that each scenario still has
+the exact route/span/node/edge/load/measured-span counts the documentation quotes, that every
+route is within the interactive limit, that every scenario builds without errors, and that the
+annotated dataset only refers to asset ids that are really drawn. A baseline whose dataset
+silently changed shape would make every number in the document unattributable.
+
+**How to re-run it.** `npm run benchmark`, `npm run benchmark -- --scaling`,
+`npm run benchmark:browser`. No threshold, no gate: these are measurements, and nothing in
+the test suite reads them.
+
+## F13 — Annotation placement is quadratic in the number of labels
+
+**Status: open, recorded.** Found by the F9 baseline; not fixed, deliberately.
+
+**Observed.** `npm run benchmark -- --scaling` grows a one-span-per-route chain and times
+placement alone:
+
+| Spans | Placement | Per span | Ratio vs. half the size |
+| --- | --- | --- | --- |
+| 50 | 1.07 ms | 21.4 µs | — |
+| 100 | 1.97 ms | 19.7 µs | x1.84 |
+| 200 | 5.90 ms | 29.5 µs | x2.99 |
+| 400 | 20.20 ms | 50.5 µs | x3.42 |
+| 800 | 73.65 ms | 92.1 µs | x3.65 |
+
+Linear work would double at each step; this nearly quadruples, and the cost *per span*
+rises instead of staying flat.
+
+**Cause, read from the code not inferred from the curve.** `countCollisions()` in
+[src/geometry/annotations.js](../src/geometry/annotations.js) walks the entire static
+obstacle list **and** the entire list of already-taken labels for every candidate position
+it scores, and it is called for every annotation. With *n* annotations, ~1044 obstacles and
+~10 candidates each on the 501-span dataset, the work is
+`n x candidates x (obstacles + taken)` — quadratic in *n*.
+
+**Impact.** On the 501-span drawings this is essentially the whole scene build (13.6 ms of
+13.5 ms) and a large share of the 92 ms a recompute blocks the main thread for; on the
+fully surveyed drawing a recompute is 225 ms. Below a few hundred spans it is invisible.
+
+**Why it is not fixed here.** The F9 brief was measurement only, and the fix is not local:
+the candidate search would need obstacle indexing (a spatial grid or an interval index
+rebuilt per annotation) to become sub-linear. That is a real change with a real risk of
+altering placement decisions, and it needs the baseline numbers in hand to be judged — which
+is exactly what this act produced.
+
+**Suggested direction** (not done): index the obstacles by grid cell per scene instead of
+scanning them per candidate, then re-run `npm run benchmark -- --scaling` and compare the
+medians. The placement results must be byte-identical for the four baseline datasets before
+and after, or the change has altered the drawing.
 
 ## F10 — A load cannot reach a TC point by creation, move, edit, import or file
 

@@ -15,6 +15,68 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ## Unreleased
 
+### Added
+
+- **A reproducible performance baseline for large drawings (closes finding F9).** The tool
+  had no measurement beyond the bundled example's 34 nodes, so "is this slow?" could only
+  be answered by impression. There are now two benchmark scripts over four fixed drawings,
+  and the numbers they produce are published rather than asserted.
+
+  ```
+  npm run benchmark                # DOM-free phases, four datasets
+  npm run benchmark -- --scaling   # annotation placement vs drawing size
+  npm run benchmark:browser        # the real page in Chrome: cold start and recompute
+  ```
+
+  Four datasets, defined once in `scripts/benchmark-datasets.mjs` and pinned by
+  `test/benchmark_datasets.test.js`:
+
+  | Scenario | Shape | Routes | Spans | Nodes | Edges | Loads | Measured spans |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | A-example | the bundled example | 9 | 34 | 34 | 33 | 0 | 0 |
+  | B-medium | 32-span spine, eight 8-span branches | 16 | 96 | 97 | 96 | 0 | 0 |
+  | C-large | 40 routes, one chain | 40 | 501 | 502 | 501 | 0 | 0 |
+  | D-surveyed | C, fully surveyed | 40 | 501 | 502 | 501 | 50 | 501 |
+
+  Every route stays within `MAX_ROUTE_SPANS` (500, widest 13) and every scenario must build
+  without errors, so the baseline measures drawings a user can actually build rather than
+  files the form would refuse. B is deliberately a different *shape* from C, not a smaller
+  copy: branches stress shared sources and pile labels into one strip.
+
+  What the measurement established, on the machine recorded in
+  [the baseline](documentation/11-performance-baseline.md#2-the-environment-measured):
+
+  - The network builder is not the cost: 501 spans resolve in 0.2 ms.
+  - **Annotation placement is essentially the whole scene build** on the large drawing -
+    13.6 ms of 13.5 ms - and it is **quadratic in the number of labels**: doubling the
+    drawing multiplies placement by 3.4-3.9 (1.07 ms at 50 spans, 73.65 ms at 800).
+  - A real edit - the application's own `refresh()` - blocks the main thread for 92 ms on
+    the 501-span chain and 225 ms on the fully surveyed one. The bundled example costs
+    6.8 ms, and the 34-span drawing cold-starts to a finished drawing in ~0.13 s against
+    ~0.47 s for the surveyed 501-span one.
+
+  **Nothing was optimised.** The brief was measurement, and the quadratic placement is
+  recorded as finding **F13** with its cause read from the code
+  (`countCollisions()` in `src/geometry/annotations.js` walks the whole obstacle list and
+  the whole taken-label list for every candidate of every annotation - 6 candidates per
+  span label, 12 per callout - and both lists grow with the number of labels) rather than
+  inferred from the curve. A fix changes placement decisions, so it needs these numbers in hand
+  first - which is what this act produces.
+
+  **No threshold and no gate.** Nothing in the test suite reads a timing; a duration
+  depends on the machine, so a threshold would fail on a slower laptop while the code was
+  fine. What *is* asserted is the input to the measurement: the dataset sizes and their
+  properties (10 tests in `test/benchmark_datasets.test.js`). Detecting a regression needs
+  a same-machine before/after comparison, which is what the scripts are for.
+
+  Documentation: new `documentation/11-performance-baseline.md` (method, datasets, both
+  result tables, the scaling series, what the numbers mean for a user, and what is
+  deliberately excluded - PDF, print, hit-area creation as its own phase, long sessions,
+  interaction latency); F9 rewritten as closed and F13 added in `findings.md`; a
+  performance section in `09-feature-matrix.md`; a §6 note in `08-testing.md` that timings
+  are never asserted while their inputs are; a row in `10-limitations.md`; the doc index,
+  README and all counts updated (526 Node tests in 33 files).
+
 ### Fixed
 
 - **Unknown fields in a project file were ignored silently (finding F5).** A document with

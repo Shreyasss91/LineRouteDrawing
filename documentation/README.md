@@ -12,7 +12,7 @@ says that too instead of guessing.
 Test evidence on the working tree that produced these documents:
 
 ```
-npm test               →  516 tests, 516 pass, 0 fail   (32 files)
+npm test               →  526 tests, 526 pass, 0 fail   (33 files)
 npm run test:browser   →  340/340 browser checks passed (17 sections)
 ```
 
@@ -30,6 +30,7 @@ npm run test:browser   →  340/340 browser checks passed (17 sections)
 | 8 | [Testing and development](08-testing.md) | run, add or trust the tests; follow the coding conventions |
 | 9 | [Feature and validation matrix](09-feature-matrix.md) | check whether something is verified, partial, or unsupported |
 | 10 | [Known limitations](10-limitations.md) | know what the tool cannot do, and what has not been validated |
+| 11 | [Performance baseline](11-performance-baseline.md) | know what a drawing costs, and how to re-measure it |
 | — | [Findings](findings.md) | see defects and gaps recorded but deliberately **not** fixed |
 | — | [Changelog](../CHANGELOG.md) | see what changed, when, and in which commit |
 
@@ -43,7 +44,8 @@ npm run test:browser   →  340/340 browser checks passed (17 sections)
 → [Feature and validation matrix](09-feature-matrix.md) →
 [Known limitations §7](10-limitations.md#7-validation-status-by-area) →
 [Findings](findings.md). The short version: the domain layer is heavily tested
-(516 tests), the browser behaviour is checked end to end (340 checks), and the gaps are
+(526 tests), the browser behaviour is checked end to end (340 checks), the drawing's cost
+is measured rather than guessed ([baseline](11-performance-baseline.md)), and the gaps are
 listed explicitly rather than glossed.
 
 **A developer about to change the code**

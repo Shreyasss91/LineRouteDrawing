@@ -136,7 +136,7 @@ not been demonstrated.
 
 ### Verified automatically
 
-- The whole domain layer: **516 Node tests across 32 files**, all passing on the
+- The whole domain layer: **526 Node tests across 33 files**, all passing on the
   current working tree.
 - The application in a real browser: **340 checks in 17 sections**, all passing,
   including one-page print fit for **all four layouts** and the TC geometry on the
@@ -232,3 +232,4 @@ places an operator looks; nothing is clamped, rounded or dropped on the way in.
 | Annotation dragging is per-record | There is no way to select several callouts and move them together, and no reset-to-automatic |
 | Export switches are per project | `exportLoads`/`exportLengths` are saved with the project and travel with the file, so a colleague opening your file exports the same sheet you intended |
 | The completeness notice is preview-only | It is never exported, so a PDF does not say that some spans are unmeasured |
+| Editing a fully-surveyed 500-span drawing is slow | ~225 ms of main-thread work per edit on the machine in [the baseline](11-performance-baseline.md#2-the-environment-measured), because annotation placement is quadratic in the number of labels ([F13](findings.md#f13-annotation-placement-is-quadratic-in-the-number-of-labels)). Below a few hundred spans it is imperceptible |

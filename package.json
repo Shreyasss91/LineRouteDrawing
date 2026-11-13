@@ -8,6 +8,8 @@
     "test": "node --test \"test/*.test.js\"",
     "test:browser": "node scripts/test-browser.mjs",
     "test:print:headed": "node scripts/print-dialog-smoke.mjs",
+    "benchmark": "node scripts/benchmark.mjs",
+    "benchmark:browser": "node scripts/benchmark-browser.mjs",
     "serve": "node scripts/serve.js"
   },
   "keywords": [
