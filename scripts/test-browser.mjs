@@ -893,6 +893,110 @@ try {
   );
   check('no error is shown the second time', (await formErrorText()) === null);
 
+  // --- The destination is a shared junction, not its own asset id ---
+  //
+  // Identity is first-writer-wins, so when two routes finish at the SAME coordinate only
+  // the earlier route's id is a registered asset: `dst:<secondRoute>` resolves to nothing
+  // even though the route is perfectly valid. The guard used to fall back to comparing raw
+  // ids in that case, found `dst:route-10 !== dst:route-11`, and allowed the edit - the
+  // shared node became a TC with the load still on it and the project was unopenable.
+  // Reproduced before the fix; this is the regression test for it. The destination is now
+  // resolved by the coordinate its path ends on, so the shared identity is found.
+  await fresh(page, base);
+  await page.click('#btn-clear');
+  await page.waitForTimeout(250);
+  await addRoute(page, { from: 'origin', direction: 'south', spans: 1 });
+  await addRoute(page, { from: 'origin', direction: 'south', spans: 1 });
+  const junctionRows = await readRouteRows(page);
+  check('the junction fixture has two routes', junctionRows.length === 2, `${junctionRows.length} rows`);
+
+  // The second route's destination is the same physical point as the first route's, so
+  // only the first route's asset id exists. Proves the premise rather than assuming it.
+  const junctionIdentity = await page.evaluate(async () => {
+    const { buildNetwork } = await import('./src/geometry/network.js');
+    const { buildAssetRegistry } = await import('./src/geometry/assets.js');
+    const routes = [
+      { id: 'route-10', from: 'origin', direction: 'south', spans: 1, tc: false, fpb: false },
+      { id: 'route-11', from: 'origin', direction: 'south', spans: 1, tc: false, fpb: false },
+    ];
+    const registry = buildAssetRegistry(buildNetwork(routes));
+    return {
+      first: registry.canonicalNodeId('dst:route-10'),
+      second: registry.canonicalNodeId('dst:route-11'),
+      coordinate: registry.canonicalNodeId('0,-1'),
+    };
+  });
+  check(
+    'the second route destination is not its own asset id',
+    junctionIdentity.second === null && junctionIdentity.first === 'dst:route-10',
+    JSON.stringify(junctionIdentity),
+  );
+  check(
+    'both route destinations resolve to the same physical node',
+    junctionIdentity.coordinate === junctionIdentity.first,
+    JSON.stringify(junctionIdentity),
+  );
+
+  // A load on the shared node, addressed by the id that IS registered.
+  await page.click('#tab-loads');
+  await addLoad(page, { nodeId: 'dst:route-10', value: 25, unit: 'kVA' });
+  const junctionBefore = await readSavedProject(page);
+  check(
+    'the shared-node load is recorded',
+    junctionBefore?.loads?.length === 1 && junctionBefore.loads[0].nodeId === 'dst:route-10',
+    JSON.stringify(junctionBefore?.loads),
+  );
+
+  // Editing the SECOND route is the case the raw fallback missed.
+  await page.locator('#route-rows tr[data-id="route-11"] button[data-action="edit"]').click();
+  await page.waitForTimeout(250);
+  await page.check('#field-tc');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(400);
+  const junctionRefusal = await formErrorText();
+  check(
+    'a load on the shared node is found through the second route',
+    Boolean(junctionRefusal) && /25 kVA/.test(junctionRefusal ?? ''),
+    String(junctionRefusal),
+  );
+
+  const junctionAfter = await readSavedProject(page);
+  check(
+    'the shared-node edit changed nothing',
+    junctionAfter?.routes?.[1]?.tc === false &&
+      JSON.stringify(junctionAfter?.loads) === JSON.stringify(junctionBefore?.loads),
+    JSON.stringify({ route: junctionAfter?.routes?.[1], loads: junctionAfter?.loads }),
+  );
+  const junctionReopen = await page.evaluate(async () => {
+    const { parseProjectJson } = await import('./src/ui/project.js');
+    const result = parseProjectJson(localStorage.getItem('line-route-drawing:v3:project'), {});
+    return result.ok ? { ok: true } : { ok: false, code: result.code };
+  });
+  check(
+    'the shared-node project is still openable',
+    junctionReopen.ok === true,
+    JSON.stringify(junctionReopen),
+  );
+
+  // A junction with NO load must still be free to become a TC point - the guard must not
+  // over-refuse simply because the destination is a shared node.
+  await page.click('#tab-loads');
+  await page.waitForTimeout(200);
+  await page.locator('#load-rows button').filter({ hasText: 'Remove' }).first().click();
+  await page.waitForTimeout(300);
+  await page.locator('#route-rows tr[data-id="route-11"] button[data-action="edit"]').click();
+  await page.waitForTimeout(250);
+  await page.check('#field-tc');
+  await page.click('#btn-save-route');
+  await page.waitForTimeout(400);
+  const junctionClean = await readSavedProject(page);
+  check(
+    'a shared destination with no load can still become a TC point',
+    junctionClean?.routes?.[1]?.tc === true,
+    JSON.stringify(junctionClean?.routes?.[1]),
+  );
+  check('no error for the load-free shared node', (await formErrorText()) === null);
+
   /* ---------------- The same transition, with an aliased load ---------------- */
 
   section('Changing a destination to a TC point (aliased load)');

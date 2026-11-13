@@ -9,7 +9,7 @@
  */
 
 import { EXAMPLE_ROUTES, RENDER_PROFILES, createConfig, PAGE_LAYOUTS } from '../config.js';
-import { buildNetwork } from '../geometry/network.js';
+import { buildNetwork, coordKey } from '../geometry/network.js';
 import { buildScene } from '../geometry/scene.js';
 import { createSpanLengths } from '../data/schedules.js';
 import { createNetworkPanel } from './network_panel.js';
@@ -1094,6 +1094,45 @@ function readForm() {
   };
 }
 
+/**
+ * The physical node a route's destination occupies, as a canonical asset id.
+ *
+ * Two ways to name it, tried in order, because a route's destination is not always a
+ * registered asset id:
+ *
+ * 1. `dst:<routeId>` - the normal case.
+ * 2. The coordinate the route's path ends on - needed when two routes finish at the same
+ *    point (an ordinary junction). Identity there is first-writer-wins, so only the
+ *    earliest route's id is registered and `dst:<laterRoute>` resolves to nothing even
+ *    though the route is valid. The coordinate resolves to whichever id owns the point,
+ *    which is the identity that actually matters.
+ *
+ * Returns `null` when neither resolves, i.e. when physical identity cannot be
+ * established at all. Callers must treat `null` as "refuse", never as "no load".
+ *
+ * Uses only the registry's own primitives - `canonicalNodeId()` already accepts both
+ * asset ids and coordinate spellings - and `coordKey()` for the coordinate's string form,
+ * so no second identity registry or id parser is introduced.
+ *
+ * @param {string} routeId Route id, stable across edits.
+ * @returns {string|null} Canonical node asset id, or null.
+ */
+function canonicalDestinationNode(routeId) {
+  // The registry is built by `recompute()` and `boot()` calls it synchronously before any
+  // form submission can be dispatched, so this is a guard against a future reordering
+  // rather than an expected state. Failing closed keeps it safe either way.
+  const registry = current?.registry;
+  if (!registry) return null;
+
+  const byId = registry.canonicalNodeId(destinationAssetId(routeId));
+  if (byId) return byId;
+
+  const route = (current?.network?.routes ?? []).find((r) => r.routeId === routeId);
+  const end = route?.path?.[route.path.length - 1];
+  if (!end) return null;
+  return registry.canonicalNodeId(coordKey(end));
+}
+
 function handleSubmit(event) {
   event.preventDefault();
   const result = readForm();
@@ -1121,16 +1160,31 @@ function handleSubmit(event) {
         // be a coordinate spelling (`0,-2`) or any other accepted alias for the same
         // pole, and the loader keeps that spelling verbatim rather than rewriting it, so
         // `nodeId === destinationAssetId(...)` missed exactly those loads and let an
-        // aliased load be stranded on a freshly made TC point. Both sides are resolved
-        // through the live registry - the one authority on identity - and compared as
-        // canonical node ids.
-        const registry = current?.registry;
-        const destinationId = destinationAssetId(state.routes[index].id);
-        const canonicalDestination = registry
-          ? registry.canonicalNodeId(destinationId)
-          : destinationId;
+        // aliased load be stranded on a freshly made TC point.
+        //
+        // This check FAILS CLOSED. It used to fall back to comparing raw ids when the
+        // destination could not be resolved, and that fallback was itself a data-loss
+        // path: two routes may end at the SAME coordinate (an ordinary junction), in
+        // which case only the first claimer is a registered asset - `dst:<secondRoute>`
+        // resolves to nothing even though the route is perfectly valid. The raw fallback
+        // then compared `dst:route-10` against `dst:route-11`, found them different, and
+        // allowed the edit; the shared node became a TC with a load still on it and the
+        // project was unopenable. So an unresolvable destination now refuses the edit
+        // instead of guessing.
+        const canonicalDestination = canonicalDestinationNode(state.routes[index].id);
+        if (canonicalDestination === null) {
+          // Retryable and honest: nothing was changed, and saying so is better than
+          // either saving an unopenable project or implying the user did something wrong.
+          showFormError(
+            'This route cannot be changed to a TC point yet: its destination cannot be ' +
+              'located in the drawing, so the loads on it cannot be checked. Nothing has ' +
+              'been changed - try again, and if it keeps happening save the project and ' +
+              'reload it first.',
+          );
+          return;
+        }
+        const registry = current.registry;
         const attached = (state.loads ?? []).filter((load) => {
-          if (!registry) return load.nodeId === destinationId;
           const canonicalLoad = registry.canonicalNodeId(load.nodeId);
           return canonicalLoad !== null && canonicalLoad === canonicalDestination;
         });

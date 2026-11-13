@@ -17,6 +17,56 @@ traced to the exact diff. Documentation-only changes are recorded too — they a
 
 ### Fixed
 
+- **The route-edit TC guard fell back to raw id equality, which was itself a data-loss
+  path.** An earlier version resolved the destination's canonical id and, when that failed,
+  compared raw identifiers instead. Identity here is first-writer-wins, so when two routes
+  finish at the **same coordinate** — an ordinary junction — only the earlier route's id is
+  a registered asset: `dst:route-11` resolves to nothing while the route is perfectly
+  valid. The fallback then compared `dst:route-10` against `dst:route-11`, found them
+  different, and allowed the edit. The shared node became a TC with the load still on it
+  and the project was unopenable — reproduced with both routes valid:
+
+  ```
+  two routes: origin -> south 1 span   (both destinations at 0,-1)
+  load:       load-1 -> dst:route-10, 25 kVA
+  edit route-11, tick TC, save
+    -> no error, route-11 saved tc: true
+    -> parseProjectJson: { ok: false, code: 'INELIGIBLE_LOAD_TARGET' }
+  ```
+
+  The guard now resolves the destination **by asset id first, then by the coordinate the
+  route's path ends on** (a route whose destination is a shared junction has no id of its
+  own), compares canonical identities, and **fails closed**: if the destination cannot be
+  located at all, the edit is refused with a retryable message instead of guessing.
+  `coordKey()` and `canonicalNodeId()` are the existing helpers — no second registry and no
+  hand-written id parsing.
+
+### Added
+
+- Browser §6 extended with a **shared-junction** case (9 checks), suite 257 → 266. It
+  proves the premise (the second route's destination is not its own asset id, and both
+  destinations resolve to the same physical node), that a load on the shared node is found
+  when editing the *second* route and the edit refused with the stored project still
+  openable, and that a load-free shared destination can still become a TC point — so the
+  guard does not over-refuse junctions.
+
+### Notes
+
+- Registry absence is a separate, unreachable case rather than a handled one: `boot()`
+  calls `refresh() → recompute()` synchronously before any submit event can be dispatched,
+  so `current.registry` always exists. The null check remains as a guard against a future
+  reordering and is documented as such.
+
+### Validation
+
+- `npm test` → 478 tests, 478 pass, 0 fail.
+- `npm run test:browser` → 266/266 checks passed, 14 sections (was 257/257).
+- Mutation: restoring id-only resolution with a raw-id fallback fails 3 checks, including
+  "the shared-node project is still openable" (`{"ok":false,"code":"INELIGIBLE_LOAD_TARGET"}`).
+  Source restored byte-for-byte; suites re-run green.
+
+### Fixed
+
 - **The route-edit TC guard compared identifier text, so an aliased load was missed.**
   `5404f21` detected attached loads with `load.nodeId === destinationAssetId(routeId)`.
   A load's `nodeId` may legally be a coordinate spelling — the registry resolves `0,-2`

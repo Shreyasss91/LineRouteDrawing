@@ -280,6 +280,19 @@ another's job:
    version compared `load.nodeId === destinationAssetId(routeId)` and missed exactly those
    loads — reproduced, and it reopened the data-loss path this rule exists to close.
 
+   It also **fails closed**. An earlier version fell back to comparing raw ids when the
+   destination could not be canonicalised, and that fallback was itself a data-loss path:
+   identity is first-writer-wins, so when two routes end at the **same coordinate** (an
+   ordinary junction) only the earlier route's id is registered and `dst:<laterRoute>`
+   resolves to nothing while the route is perfectly valid. The fallback then compared
+   `dst:route-10` against `dst:route-11`, found them different, and allowed the edit; the
+   shared node became a TC with the load still on it and the project was unopenable.
+   Reproduced with both routes valid. The destination is now resolved by its **asset id
+   first, then by the coordinate its path ends on**, and an unresolvable destination
+   refuses the edit with a retryable message instead of guessing. Registry absence is a
+   separate, unreachable case: `boot()` calls `refresh() → recompute()` synchronously
+   before any submit can be dispatched, so the registry always exists.
+
 `insertLoadRecord()`, `insertReassignedLoad()` and `applyNodeLoadPlan()` are **unguarded
 by design** and are not counted as boundaries: the first two are the primitives beneath
 the guarded operations, the third trusts a plan the planner already validated.

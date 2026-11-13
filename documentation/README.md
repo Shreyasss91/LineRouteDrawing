@@ -13,7 +13,7 @@ Test evidence on the working tree that produced these documents:
 
 ```
 npm test               →  478 tests, 478 pass, 0 fail   (30 files)
-npm run test:browser   →  257/257 browser checks passed (14 sections)
+npm run test:browser   →  266/266 browser checks passed (14 sections)
 ```
 
 ## Contents
@@ -43,7 +43,7 @@ npm run test:browser   →  257/257 browser checks passed (14 sections)
 → [Feature and validation matrix](09-feature-matrix.md) →
 [Known limitations §7](10-limitations.md#7-validation-status-by-area) →
 [Findings](findings.md). The short version: the domain layer is heavily tested
-(478 tests), the browser behaviour is checked end to end (257 checks), and the gaps are
+(478 tests), the browser behaviour is checked end to end (266 checks), and the gaps are
 listed explicitly rather than glossed.
 
 **A developer about to change the code**
